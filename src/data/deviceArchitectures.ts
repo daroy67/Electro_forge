@@ -1,0 +1,3695 @@
+import { PlacedComponent, Wire } from "../types";
+
+export interface DevicePartDefinition {
+  id: string;
+  name: string;
+  category: "Mechanical" | "Power" | "Control" | "Propulsion" | "Actuator" | "Sensor" | "Communication" | "Display" | "Connectivity";
+  subsystem: string;
+  purpose: string; // Краткое инженерное назначение по ТЗ
+  inputs: string[];
+  outputs: string[];
+  powerSpecs: {
+    voltage: string;
+    current: string;
+    operatingTemp?: string;
+  };
+  parameters: Record<string, string | number>;
+  connections: string[]; // e.g. "Flight Controller → ESC → Motor"
+  failureImpact: string; // Что произойдет при отсутствии питания или обрыве
+  layerOrder: number; // Порядок разнесения на взрыв-схеме (0 = нижняя база, 1, 2, 3...)
+  assembledPosition: [number, number, number];
+  explodedPosition: [number, number, number];
+  dimensions: [number, number, number];
+  rotation?: [number, number, number];
+  meshType: string;
+  color?: string;
+  checkRule?: (components: PlacedComponent[], wires: Wire[]) => { isConnected: boolean; isPowered: boolean; notes: string };
+}
+
+export interface DeviceSubsystem {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  parts: DevicePartDefinition[];
+}
+
+export interface CompleteDeviceArchitecture {
+  id: string;
+  name: string;
+  codeName: string;
+  category: "Robotics" | "Consumer" | "Computing" | "IoT";
+  description: string;
+  weightGrams?: number;
+  nominalVoltageV?: number;
+  maxPowerW?: number;
+  subsystems: DeviceSubsystem[];
+  assemblyChecklist: AssemblyStep[];
+  testScenario?: any;
+}
+
+export interface AssemblyWiringInstruction {
+  id?: string;
+  wireColor: "red" | "black" | "yellow" | "cyan" | "blue" | "green" | "purple" | "orange";
+  colorNameRu?: string;
+  wireColorName?: string;
+  fromPartId: string;
+  fromPinId: string;
+  fromLabel: string;
+  toPartId: string;
+  toPinId: string;
+  toLabel: string;
+  wireType: string;
+  instructionText: string;
+}
+
+export interface AssemblyStep {
+  step: number;
+  title: string;
+  requiredParts: string[];
+  description: string;
+  wiringInstructions?: AssemblyWiringInstruction[];
+}
+
+// =========================================================================
+// 1. QUADCOPTER DRONE ARCHITECTURE (Разделы 3-17 ТЗ)
+// =========================================================================
+export const DRONE_ARCHITECTURE: CompleteDeviceArchitecture = {
+  id: "device-drone-pro",
+  name: "Quadcopter Drone FPV",
+  codeName: "AeroForge X4",
+  category: "Robotics",
+  description: "Полнофункциональный 4-роторный беспилотный летательный аппарат с раздельной модульной архитектурой: рама, силовое распределение, полетный контроллер с IMU, 4-in-1 ESC, бесколлекторные моторы и FPV-комплекс.",
+  weightGrams: 580,
+  nominalVoltageV: 11.1,
+  maxPowerW: 420,
+  subsystems: [
+    {
+      id: "drone-sub-frame",
+      name: "FRAME (Рама и механика)",
+      category: "Mechanical",
+      description: "Несущий силовой каркас из углеволокна (карбон 3K), удерживающий электронику, моторы и аккумулятор.",
+      parts: [
+        {
+          id: "drone-frame-body",
+          name: "Карбоновая рама X-Frame 220мм",
+          category: "Mechanical",
+          subsystem: "FRAME",
+          purpose: "Основная механическая конструкция квадрокоптера. Фиксирует лучи моторов, центральный стек плат и шасси.",
+          inputs: ["Механические вибрации", "Аэродинамическое сопротивление"],
+          outputs: ["Жесткая база для датчиков IMU и винтомоторной группы"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: {
+            "Материал": "Карбон 3K T700",
+            "Диагональ": "220 мм",
+            "Толщина лучей": "5.0 мм",
+            "Масса": "95 г",
+            "Макс. нагрузка": "2.5 кг"
+          },
+          connections: ["Рама → Крепления моторов 1-4", "Рама → Стек FC/ESC"],
+          failureImpact: "Трещина или деформация рамы вызывает резонансные вибрации, сбивающие гироскоп полетного контроллера.",
+          layerOrder: 2,
+          assembledPosition: [0, 0.4, 0],
+          explodedPosition: [0, 0.4, 0],
+          dimensions: [7.0, 0.5, 7.0],
+          meshType: "drone_frame"
+        }
+      ]
+    },
+    {
+      id: "drone-sub-power",
+      name: "POWER (Система питания)",
+      category: "Power",
+      description: "Химический источник энергии высокой токоотдачи и плата распределения силовых токов на регуляторы.",
+      parts: [
+        {
+          id: "drone-part-battery",
+          name: "Li-Po 3S 11.1V 2200mAh 75C",
+          category: "Power",
+          subsystem: "POWER",
+          purpose: "Источник электрохимической энергии высокой мощности для питания винтомоторной группы и электроники.",
+          inputs: ["Зарядное устройство балансировочное"],
+          outputs: ["Силовая шина 11.1V - 12.6V (до 75A пик)", "Балансировочный разъем"],
+          powerSpecs: { voltage: "11.1V (12.6V макс)", current: "До 75A пик", operatingTemp: "от -10°C до +60°C" },
+          parameters: {
+            "Емкость": "2200 мА·ч",
+            "Токоотдача (C-Rating)": "75C (165A импульс)",
+            "Химия": "LiCoO2 / Графит",
+            "Масса": "185 г",
+            "Разъем": "XT60H с золотым покрытием"
+          },
+          connections: ["Battery → Power Distribution Board / ESC"],
+          failureImpact: "Без подключения аккумулятора система полностью обесточена. При глубоком разряде ниже 3.0V на банку дрон падает.",
+          layerOrder: 0,
+          assembledPosition: [0, -0.6, 0],
+          explodedPosition: [0, -3.2, 0],
+          dimensions: [4.0, 1.2, 2.0],
+          meshType: "drone_battery"
+        },
+        {
+          id: "drone-part-pdb",
+          name: "PDB (Плата распределения питания + BEC 5V/9V)",
+          category: "Power",
+          subsystem: "POWER",
+          purpose: "Распределяет высоковольтное силовое питание на 4 регулятора ESC и понижает напряжение до чистых 5V для полетного контроллера.",
+          inputs: ["XT60 Силовой вход 11.1V от батареи"],
+          outputs: ["4x Питание ESC (11.1V)", "BEC 5V 2.5A на Flight Controller", "BEC 9V 1.5A на видеопередатчик VTX"],
+          powerSpecs: { voltage: "Вход 11.1V, выходы 5V / 9V / VBat", current: "До 120A суммарно" },
+          parameters: {
+            "Медные слои": "4oz медь высокой проводимости",
+            "Фильтрация": "TVS-диод защиты от всплесков до 35V",
+            "Датчик тока": "Шунт 0.5 мОм (телеметрия тока)",
+            "Масса": "14 г"
+          },
+          connections: ["Battery → PDB → ESC 1-4", "PDB (BEC 5V) → Flight Controller"],
+          failureImpact: "Выход из строя BEC 5V обесточит полетный контроллер, моторы выключатся в полете.",
+          layerOrder: 1,
+          assembledPosition: [0, 0.1, 0],
+          explodedPosition: [0, -1.5, 0],
+          dimensions: [2.5, 0.3, 2.5],
+          meshType: "drone_pdb"
+        }
+      ]
+    },
+    {
+      id: "drone-sub-control",
+      name: "CONTROL (Полетный контроллер и навигация)",
+      category: "Control",
+      description: "Главный вычислительный мозг дрона с 32-битным микроконтроллером и 6-осевым датчиком положения IMU.",
+      parts: [
+        {
+          id: "drone-part-fc",
+          name: "Flight Controller F405 (STM32 + IMU)",
+          category: "Control",
+          subsystem: "CONTROL",
+          purpose: "Главный мозг дрона. Каждые 125 мкс опрашивает гироскоп/акселерометр, производит PID-расчет и выдает DShot-команды моторам.",
+          inputs: ["Питание 5V от PDB", "Данные гироскопа IMU", "Команды от радиоприемника Receiver", "Данные GPS"],
+          outputs: ["4x ШИМ/DShot600 сигналы на ESC", "Телеметрия OSD на видеопередатчик"],
+          powerSpecs: { voltage: "5.0V ±0.2V", current: "250 мА", operatingTemp: "от -20°C до +70°C" },
+          parameters: {
+            "Процессор (MCU)": "STM32F405 ARM Cortex-M4 168MHz",
+            "Датчик IMU": "BMI270 6-осевой (гироскоп + акселерометр)",
+            "Барометр": "DPS310 (высота с точностью 10 см)",
+            "Память Blackbox": "16MB SPI Flash",
+            "Масса": "8.5 г"
+          },
+          connections: ["Flight Controller → ESC (сигналы моторов)", "Receiver → Flight Controller"],
+          failureImpact: "Если полетный контроллер не получает питание 5V, управляющие импульсы на моторы не поступают.",
+          layerOrder: 3,
+          assembledPosition: [0, 0.9, 0],
+          explodedPosition: [0, 1.8, 0],
+          dimensions: [2.5, 0.4, 2.5],
+          meshType: "drone_fc"
+        }
+      ]
+    },
+    {
+      id: "drone-sub-propulsion",
+      name: "PROPULSION (Винтомоторная группа)",
+      category: "Propulsion",
+      description: "Электронные регуляторы скорости (ESC), 4 мощных бесколлекторных мотора и пропеллеры согласованного вращения.",
+      parts: [
+        {
+          id: "drone-part-esc",
+          name: "4-in-1 ESC 45A BLHeli_S (Регулятор моторов)",
+          category: "Actuator",
+          subsystem: "PROPULSION",
+          purpose: "Преобразует постоянный ток аккумулятора в 3-фазный переменный ток высокой частоты для каждого из 4 бесколлекторных моторов.",
+          inputs: ["11.1V от PDB/Battery", "4x управляющих сигнала DShot от FC"],
+          outputs: ["4x 3-фазных выхода (A/B/C) на моторы 1-4"],
+          powerSpecs: { voltage: "11.1V - 25.2V (3S-6S)", current: "4x 45A (55A пик)", operatingTemp: "до +105°C" },
+          parameters: {
+            "Ключи MOSFET": "32x N-Channel Low-RDSon 30V",
+            "Частота ШИМ": "48 кГц",
+            "Протокол": "DShot600 (цифровой)",
+            "Масса": "16 г"
+          },
+          connections: ["FC → ESC → Motors 1-4"],
+          failureImpact: "При обрыве сигнального провода между FC и ESC мотор 3 не запускается, взлет невозможен.",
+          layerOrder: 2,
+          assembledPosition: [0, 0.5, 0],
+          explodedPosition: [0, -0.6, 0],
+          dimensions: [2.8, 0.4, 2.8],
+          meshType: "drone_esc"
+        },
+        {
+          id: "drone-part-motor-1",
+          name: "Brushless Motor 1 (Передний Правый - CCW)",
+          category: "Actuator",
+          subsystem: "PROPULSION",
+          purpose: "Преобразует электрическую мощность в высокоскоростное вращение (до 26 000 об/мин) против часовой стрелки.",
+          inputs: ["3-фазный ток от ESC канал 1"],
+          outputs: ["Вращающий момент вала (тяга до 850г с пропеллером)"],
+          powerSpecs: { voltage: "11.1V", current: "до 22A макс", operatingTemp: "до +80°C" },
+          parameters: { "Статор": "2306", "KV": "2400 об/В", "Вращение": "CCW", "Тяга": "850 г" },
+          connections: ["ESC Канал 1 → Мотор 1"],
+          failureImpact: "Отказ мотора приводит к мгновенной потере подъемной силы по диагонали и крену дрона.",
+          layerOrder: 4,
+          assembledPosition: [2.5, 0.7, -2.5],
+          explodedPosition: [3.8, 2.4, -3.8],
+          dimensions: [1.4, 1.2, 1.4],
+          meshType: "drone_motor"
+        },
+        {
+          id: "drone-part-motor-2",
+          name: "Brushless Motor 2 (Передний Левый - CW)",
+          category: "Actuator",
+          subsystem: "PROPULSION",
+          purpose: "Преобразует электрическую мощность во вращение по часовой стрелке для компенсации гироскопического момента.",
+          inputs: ["3-фазный ток от ESC канал 2"],
+          outputs: ["Вращающий момент вала (тяга до 850г)"],
+          powerSpecs: { voltage: "11.1V", current: "до 22A макс" },
+          parameters: { "Статор": "2306", "KV": "2400 об/В", "Вращение": "CW", "Тяга": "850 г" },
+          connections: ["ESC Канал 2 → Мотор 2"],
+          failureImpact: "Отказ мотора делает взлет невозможным.",
+          layerOrder: 4,
+          assembledPosition: [-2.5, 0.7, -2.5],
+          explodedPosition: [-3.8, 2.4, -3.8],
+          dimensions: [1.4, 1.2, 1.4],
+          meshType: "drone_motor"
+        },
+        {
+          id: "drone-part-motor-3",
+          name: "Brushless Motor 3 (Задний Левый - CCW)",
+          category: "Actuator",
+          subsystem: "PROPULSION",
+          purpose: "Преобразует электрическую мощность во вращение против часовой стрелки.",
+          inputs: ["3-фазный ток от ESC канал 3"],
+          outputs: ["Вращающий момент вала (тяга до 850г)"],
+          powerSpecs: { voltage: "11.1V", current: "до 22A макс" },
+          parameters: { "Статор": "2306", "KV": "2400 об/В", "Вращение": "CCW", "Тяга": "850 г" },
+          connections: ["ESC Канал 3 → Мотор 3"],
+          failureImpact: "Отказ мотора делает взлет невозможным.",
+          layerOrder: 4,
+          assembledPosition: [-2.5, 0.7, 2.5],
+          explodedPosition: [-3.8, 2.4, 3.8],
+          dimensions: [1.4, 1.2, 1.4],
+          meshType: "drone_motor"
+        },
+        {
+          id: "drone-part-motor-4",
+          name: "Brushless Motor 4 (Задний Правый - CW)",
+          category: "Actuator",
+          subsystem: "PROPULSION",
+          purpose: "Преобразует электрическую мощность во вращение по часовой стрелке.",
+          inputs: ["3-фазный ток от ESC канал 4"],
+          outputs: ["Вращающий момент вала (тяга до 850г)"],
+          powerSpecs: { voltage: "11.1V", current: "до 22A макс" },
+          parameters: { "Статор": "2306", "KV": "2400 об/В", "Вращение": "CW", "Тяга": "850 г" },
+          connections: ["ESC Канал 4 → Мотор 4"],
+          failureImpact: "Отказ мотора делает взлет невозможным.",
+          layerOrder: 4,
+          assembledPosition: [2.5, 0.7, 2.5],
+          explodedPosition: [3.8, 2.4, 3.8],
+          dimensions: [1.4, 1.2, 1.4],
+          meshType: "drone_motor"
+        },
+        {
+          id: "drone-part-prop-1",
+          name: "Пропеллер 1 (5045x3 CCW)",
+          category: "Mechanical",
+          subsystem: "PROPULSION",
+          purpose: "Преобразует крутящий момент мотора 1 в вертикальную аэродинамическую тягу.",
+          inputs: ["Вращение вала мотора 1"],
+          outputs: ["Тяга вверх (до 850 г)"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: { "Диаметр": "5.0 дюймов", "Шаг": "4.5 дюйма", "Лопастей": 3, "Направление": "CCW" },
+          connections: ["Мотор 1 → Пропеллер 1"],
+          failureImpact: "Сломанная лопасть вызывает чудовищный дисбаланс и вибрации, дрон теряет управление.",
+          layerOrder: 5,
+          assembledPosition: [2.5, 1.3, -2.5],
+          explodedPosition: [3.8, 4.2, -3.8],
+          dimensions: [3.2, 0.2, 3.2],
+          meshType: "drone_prop"
+        },
+        {
+          id: "drone-part-prop-2",
+          name: "Пропеллер 2 (5045x3 CW)",
+          category: "Mechanical",
+          subsystem: "PROPULSION",
+          purpose: "Преобразует крутящий момент мотора 2 в тягу (вращение CW).",
+          inputs: ["Вращение вала мотора 2"],
+          outputs: ["Тяга вверх (до 850 г)"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: { "Диаметр": "5.0 дюймов", "Шаг": "4.5 дюйма", "Лопастей": 3, "Направление": "CW" },
+          connections: ["Мотор 2 → Пропеллер 2"],
+          failureImpact: "Сломанная лопасть вызывает потерю управления.",
+          layerOrder: 5,
+          assembledPosition: [-2.5, 1.3, -2.5],
+          explodedPosition: [-3.8, 4.2, -3.8],
+          dimensions: [3.2, 0.2, 3.2],
+          meshType: "drone_prop"
+        },
+        {
+          id: "drone-part-prop-3",
+          name: "Пропеллер 3 (5045x3 CCW)",
+          category: "Mechanical",
+          subsystem: "PROPULSION",
+          purpose: "Преобразует крутящий момент мотора 3 в тягу (вращение CCW).",
+          inputs: ["Вращение вала мотора 3"],
+          outputs: ["Тяга вверх (до 850 г)"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: { "Диаметр": "5.0 дюймов", "Шаг": "4.5 дюйма", "Лопастей": 3, "Направление": "CCW" },
+          connections: ["Мотор 3 → Пропеллер 3"],
+          failureImpact: "Сломанная лопасть вызывает потерю управления.",
+          layerOrder: 5,
+          assembledPosition: [-2.5, 1.3, 2.5],
+          explodedPosition: [-3.8, 4.2, 3.8],
+          dimensions: [3.2, 0.2, 3.2],
+          meshType: "drone_prop"
+        },
+        {
+          id: "drone-part-prop-4",
+          name: "Пропеллер 4 (5045x3 CW)",
+          category: "Mechanical",
+          subsystem: "PROPULSION",
+          purpose: "Преобразует крутящий момент мотора 4 в тягу (вращение CW).",
+          inputs: ["Вращение вала мотора 4"],
+          outputs: ["Тяга вверх (до 850 г)"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: { "Диаметр": "5.0 дюймов", "Шаг": "4.5 дюйма", "Лопастей": 3, "Направление": "CW" },
+          connections: ["Мотор 4 → Пропеллер 4"],
+          failureImpact: "Сломанная лопасть вызывает потерю управления.",
+          layerOrder: 5,
+          assembledPosition: [2.5, 1.3, 2.5],
+          explodedPosition: [3.8, 4.2, 3.8],
+          dimensions: [3.2, 0.2, 3.2],
+          meshType: "drone_prop"
+        }
+      ]
+    },
+    {
+      id: "drone-sub-comm",
+      name: "COMMUNICATION & NAVIGATION",
+      category: "Communication",
+      description: "Радиоприемник команд пилота и спутниковый модуль геопозиционирования GPS/ГЛОНАСС.",
+      parts: [
+        {
+          id: "drone-part-receiver",
+          name: "Радиоприемник ELRS 2.4GHz + Антенна T-Antenna",
+          category: "Communication",
+          subsystem: "COMMUNICATION",
+          purpose: "Принимает по радиоканалу команды управления от пульта пилота (Throttle, Yaw, Pitch, Roll, Arming).",
+          inputs: ["Радиосигнал 2.4GHz LoRa", "Питание 5V от FC"],
+          outputs: ["Цифровая шина CRSF (Crossfire UART) на вход полетного контроллера"],
+          powerSpecs: { voltage: "5.0V", current: "80 мА" },
+          parameters: { "Частота": "2.4 ГГц", "Частота пакетов": "500 Гц", "Задержка": "2 мс", "Дальность": "до 15 км" },
+          connections: ["Receiver → Flight Controller (UART RX)"],
+          failureImpact: "При потере связи срабатывает процедура Failsafe: FC выключает моторы или выполняет аварийную посадку.",
+          layerOrder: 3,
+          assembledPosition: [0, 0.9, 1.4],
+          explodedPosition: [0, 2.0, 3.2],
+          dimensions: [1.2, 0.3, 1.8],
+          meshType: "drone_rx"
+        },
+        {
+          id: "drone-part-gps",
+          name: "GPS/ГЛОНАСС Модуль с компасом (UBLOX M10)",
+          category: "Sensor",
+          subsystem: "NAVIGATION",
+          purpose: "Определяет трехмерные координаты дрона (широта, долгота, абсолютная высота) и скорость движения.",
+          inputs: ["Спутниковые сигналы L1/L5", "Питание 5V"],
+          outputs: ["Шина UART NMEA/UBX на полетный контроллер", "I2C шина магнитного компаса"],
+          powerSpecs: { voltage: "5.0V", current: "45 мА" },
+          parameters: { "Чип": "UBLOX M10Q", "Спутников": "до 32 одновременно", "Частота обновления": "10 Гц" },
+          connections: ["GPS → Flight Controller"],
+          failureImpact: "Без GPS дрон не может автоматически зависать на месте и возвращаться в точку взлета (RTH).",
+          layerOrder: 4,
+          assembledPosition: [0, 1.8, -1.0],
+          explodedPosition: [0, 3.8, -1.8],
+          dimensions: [1.5, 0.4, 1.5],
+          meshType: "drone_gps"
+        }
+      ]
+    },
+    {
+      id: "drone-sub-camera",
+      name: "CAMERA & FPV (Видеокомплекс)",
+      category: "Sensor",
+      description: "Курсовая FPV-камера, демпфированный подвес и аналоговый/цифровой видеопередатчик 5.8GHz.",
+      parts: [
+        {
+          id: "drone-part-camera",
+          name: "FPV Камера 1200TVL (1/1.8\" Sensor 160° FOV)",
+          category: "Sensor",
+          subsystem: "CAMERA",
+          purpose: "Захватывает видеопоток в реальном времени с минимальной задержкой (до 4 мс) для управления от первого лица.",
+          inputs: ["Питание 5-12V от PDB", "Оптический свет через линзу 1.8мм"],
+          outputs: ["Аналоговый CVBS видеосигнал в полетный контроллер для наложения OSD"],
+          powerSpecs: { voltage: "5V-12V", current: "110 мА" },
+          parameters: { "Разрешение": "1200 TVL", "Угол обзора (FOV)": "160°", "Задержка": "3.8 мс" },
+          connections: ["Camera → FC (OSD) → VTX"],
+          failureImpact: "При отказе камеры пилот теряет картинку в очках шлема.",
+          layerOrder: 3,
+          assembledPosition: [0, 0.6, -2.4],
+          explodedPosition: [0, 1.2, -4.5],
+          dimensions: [1.4, 1.4, 1.5],
+          meshType: "drone_camera"
+        },
+        {
+          id: "drone-part-vtx",
+          name: "Видеопередатчик VTX 5.8GHz 800mW + Антенна Clover",
+          category: "Communication",
+          subsystem: "CAMERA",
+          purpose: "Передает высокочастотный радиосигнал с видео и телеметрией на видеошлем или монитор пилота.",
+          inputs: ["Питание 9V от PDB", "Видеосигнал с наложенным OSD от FC"],
+          outputs: ["СВЧ радиоволна 5.8 ГГц в эфир"],
+          powerSpecs: { voltage: "7V - 26V (BEC 9V)", current: "до 650 мА на мощности 800мВт", operatingTemp: "до +90°C (требует обдува)" },
+          parameters: { "Мощность": "25 / 200 / 500 / 800 мВт", "Каналов": "48CH", "Разъем антенны": "MMCX / SMA" },
+          connections: ["FC OSD → VTX → Антенна"],
+          failureImpact: "Включение VTX без прикрученной антенны моментально сжигает выходной усилитель мощности!",
+          layerOrder: 3,
+          assembledPosition: [0, 0.8, 0.8],
+          explodedPosition: [0, 2.2, 1.8],
+          dimensions: [1.8, 0.4, 1.8],
+          meshType: "drone_vtx"
+        }
+      ]
+    }
+  ],
+  assemblyChecklist: [
+    {
+      step: 1,
+      title: "Шаг 1: Монтаж карбоновой рамы и полетного стека",
+      requiredParts: [
+        "drone-frame-body",
+        "drone-part-pdb",
+        "drone-part-esc",
+        "drone-part-fc",
+        "drone-part-motor-1",
+        "drone-part-motor-2",
+        "drone-part-motor-3",
+        "drone-part-motor-4",
+      ],
+      description: "Установка несущей карбоновой рамы X-Frame 220мм, базового стека плат (PDB, ESC, FC) и 4 бесколлекторных моторов на лучах.",
+      wiringInstructions: [],
+    },
+    {
+      step: 2,
+      title: "Шаг 2: Силовая шина питания XT60 (Аккумулятор 4S ➜ PDB)",
+      requiredParts: ["drone-part-pdb", "drone-part-battery"],
+      description: "Подключение силовой шины высокого тока XT60 аккумулятора Li-Po 4S (14.8V) к плате распределения питания PDB (VBAT и GND).",
+      wiringInstructions: [
+        {
+          id: "drone-wire-bat-pdb-pos",
+          wireColor: "red",
+          colorNameRu: "Красный",
+          fromPartId: "drone-part-battery",
+          fromPinId: "pos",
+          fromLabel: "Аккумулятор Li-Po [pos (+)]",
+          toPartId: "drone-part-pdb",
+          toPinId: "vbat_in",
+          toLabel: "PDB Плата [vbat_in]",
+          wireType: "Силовой провод 12AWG (до 60A)",
+          instructionText: "Соедините положительный провод XT60 аккумулятора со входом VBAT платы распределения питания PDB.",
+        },
+        {
+          id: "drone-wire-bat-pdb-neg",
+          wireColor: "black",
+          colorNameRu: "Черный",
+          fromPartId: "drone-part-battery",
+          fromPinId: "neg",
+          fromLabel: "Аккумулятор Li-Po [neg (-)]",
+          toPartId: "drone-part-pdb",
+          toPinId: "gnd_in",
+          toLabel: "PDB Плата [gnd_in]",
+          wireType: "Силовой провод 12AWG GND",
+          instructionText: "Соедините отрицательный провод XT60 аккумулятора с общей шиной заземления GND платы PDB.",
+        },
+      ],
+    },
+    {
+      step: 3,
+      title: "Шаг 3: Стабилизированное питание контроллера (PDB BEC 5V ➜ FC F405)",
+      requiredParts: ["drone-part-pdb", "drone-part-fc"],
+      description: "Подача стабилизированного напряжения BEC 5V 2A и общей массы GND от PDB к полетному контроллеру FC.",
+      wiringInstructions: [
+        {
+          id: "drone-wire-pdb-fc-5v",
+          wireColor: "red",
+          colorNameRu: "Красный",
+          fromPartId: "drone-part-pdb",
+          fromPinId: "v5_out",
+          fromLabel: "PDB Стабилизатор [5V Out]",
+          toPartId: "drone-part-fc",
+          toPinId: "vin",
+          toLabel: "Полетный контроллер [5V In]",
+          wireType: "Стабилизированное питание 5V 2A",
+          instructionText: "Подключите выход BEC 5V платы питания ко входу VIN полетного контроллера FC.",
+        },
+        {
+          id: "drone-wire-pdb-fc-gnd",
+          wireColor: "black",
+          colorNameRu: "Черный",
+          fromPartId: "drone-part-pdb",
+          fromPinId: "gnd_out",
+          fromLabel: "PDB [GND]",
+          toPartId: "drone-part-fc",
+          toPinId: "gnd",
+          toLabel: "Полетный контроллер [GND]",
+          wireType: "Провод общей массы GND",
+          instructionText: "Соедините землю GND платы питания с землей контроллера FC черным проводом.",
+        },
+      ],
+    },
+    {
+      step: 4,
+      title: "Шаг 4: Коммутация FPV-видеокомплекса (Камера ➜ VTX 5.8GHz)",
+      requiredParts: ["drone-part-camera", "drone-part-vtx"],
+      description: "Подключение аналогового видеосигнала высокой четкости от курсовой камеры к видеопередатчику VTX 5.8GHz.",
+      wiringInstructions: [
+        {
+          id: "drone-wire-cam-vtx-vid",
+          wireColor: "yellow",
+          colorNameRu: "Желтый",
+          fromPartId: "drone-part-camera",
+          fromPinId: "video",
+          fromLabel: "FPV Камера [video out]",
+          toPartId: "drone-part-vtx",
+          toPinId: "vin",
+          toLabel: "Видеопередатчик VTX [video in]",
+          wireType: "Коаксиальный видеокабель 75 Ом",
+          instructionText: "Подключите композитный видеовыход камеры ко входу видеосигнала передатчика VTX желтым проводом.",
+        },
+      ],
+    },
+    {
+      step: 5,
+      title: "Шаг 5: Подключение радиоприемника ELRS и GPS-модуля",
+      requiredParts: ["drone-part-receiver", "drone-part-gps", "drone-part-fc"],
+      description: "Коммутация цифровых шин управления CRSF (Crossfire) и телеметрии GPS по протоколам UART.",
+      wiringInstructions: [],
+    },
+    {
+      step: 6,
+      title: "Шаг 6: Финальная проверка винтомоторной группы и предполётный тест",
+      requiredParts: ["drone-part-prop-1", "drone-part-prop-2", "drone-part-prop-3", "drone-part-prop-4"],
+      description: "Проверка направления вращения моторов 1-4 (CW/CCW), надежности затяжки гаек пропеллеров и запуск предполётной диагностики.",
+      wiringInstructions: [],
+    },
+  ]
+};
+
+// =========================================================================
+// 2. SMARTPHONE ARCHITECTURE (Разделы 18-33 ТЗ)
+// =========================================================================
+export const SMARTPHONE_ARCHITECTURE: CompleteDeviceArchitecture = {
+  id: "device-smartphone-pro",
+  name: "Flagship Smartphone Architecture",
+  codeName: "ForgePhone Ultra",
+  category: "Consumer",
+  description: "Архитектура современного флагманского смартфона: цельнометаллический шасси-фрейм, гибкая AMOLED 120Hz панель, плоский Li-Po аккумулятор 5000 мАч, материнская плата с SoC BGA, контроллер питания PMIC, стереодинамики и тройной модуль камер.",
+  weightGrams: 198,
+  nominalVoltageV: 3.85,
+  maxPowerW: 25,
+  subsystems: [
+    {
+      id: "phone-sub-body",
+      name: "BODY & ENCLOSURE (Корпус и фрейм)",
+      category: "Mechanical",
+      description: "Физическая оболочка устройства: алюминиевая рамка шасси, задняя крышка и кнопки.",
+      parts: [
+        {
+          id: "phone-part-midframe",
+          name: "Алюминиевая средняя рама (Chassis)",
+          category: "Mechanical",
+          subsystem: "BODY",
+          purpose: "Несущий каркас смартфона. Рассеивает тепло от SoC и батареи, имеет вырезы под экраны и модули.",
+          inputs: ["Механическая фиксация модулей"],
+          outputs: ["Отвод тепла на корпус (тепловая трубка)"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: { "Сплав": "Алюминий 7000 серии", "Толщина": "1.2 мм", "Масса": "32 г" },
+          connections: ["Рама удерживает Дисплей, Батарею, Плату"],
+          failureImpact: "При деформации рамы происходит излом дисплея и повреждение батареи.",
+          layerOrder: 2,
+          assembledPosition: [0, 0.20, 0],
+          explodedPosition: [0, 0, 0],
+          dimensions: [4.2, 0.4, 8.4],
+          meshType: "phone_frame"
+        },
+        {
+          id: "phone-part-backcover",
+          name: "Задняя панель из закаленного стекла",
+          category: "Mechanical",
+          subsystem: "BODY",
+          purpose: "Защитная задняя крышка с отверстиями под блок камер и катушку беспроводной зарядки.",
+          inputs: ["Защита от влаги и пыли IP68"],
+          outputs: ["Эстетический вид и тактильный контакт"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: { "Стекло": "Gorilla Glass Victus", "Толщина": "0.8 мм", "Масса": "24 г" },
+          connections: ["Задняя крышка закрывает Батарею и Материнскую плату"],
+          failureImpact: "Разбитие крышки лишает смартфон пыле-влагозащиты.",
+          layerOrder: 0,
+          assembledPosition: [0, 0.05, 0],
+          explodedPosition: [0, -2.5, 0],
+          dimensions: [4.2, 0.2, 8.4],
+          meshType: "phone_backcover"
+        }
+      ]
+    },
+    {
+      id: "phone-sub-display",
+      name: "DISPLAY (Экранный модуль)",
+      category: "Display",
+      description: "Тонкая многослойная гибкая панель AMOLED 120Hz с емкостным сенсорным слоем и стеклом.",
+      parts: [
+        {
+          id: "phone-part-oled",
+          name: "AMOLED 120Hz LTPO Display + Touch Digitizer",
+          category: "Display",
+          subsystem: "DISPLAY",
+          purpose: "Основной визуальный интерфейс устройства. Воспроизводит изображение и считывает касания пальцев с частотой 240Гц.",
+          inputs: ["Питание 3.3V / 1.8V от PMIC", "Цифровая шина MIPI DSI 4-Lane от SoC", "Шина тачскрина I2C/SPI"],
+          outputs: ["Световое излучение пикселей", "Координаты прикосновений (Touch X/Y)"],
+          powerSpecs: { voltage: "3.3V (логика 1.8V)", current: "до 850 мА на полной яркости 1500 нит" },
+          parameters: { "Диагональ": "6.7 дюйма", "Разрешение": "3120x1440 QHD+", "Частота": "1-120 Гц LTPO", "Яркость": "1500 нит" },
+          connections: ["Motherboard (MIPI DSI) → Display Flex Cable"],
+          failureImpact: "При отсутствии подключения к материнской плате экран остается черным (no display output).",
+          layerOrder: 4,
+          assembledPosition: [0, 0.55, 0],
+          explodedPosition: [0, 2.2, 0],
+          dimensions: [4.0, 0.15, 8.2],
+          meshType: "phone_display"
+        }
+      ]
+    },
+    {
+      id: "phone-sub-power",
+      name: "POWER & CHARGING (Питание и контроллер)",
+      category: "Power",
+      description: "Литий-полимерная плоская ячейка высокой емкости и контроллер управления питанием PMIC.",
+      parts: [
+        {
+          id: "phone-part-battery",
+          name: "Li-Ion Pouch Cell 5000 mAh 3.85V",
+          category: "Power",
+          subsystem: "POWER",
+          purpose: "Компактный химический аккумулятор, занимающий до 60% внутреннего объема смартфона. Питает все подсистемы.",
+          inputs: ["Ток быстрой зарядки до 65W от PMIC"],
+          outputs: ["Питание шины V_BAT 3.6V - 4.4V (до 5A пик)"],
+          powerSpecs: { voltage: "3.85V ном (4.4V макс)", current: "до 5000 мА·ч (19.25 Вт·ч)" },
+          parameters: { "Плотность энергии": "750 Вт·ч/л", "Масса": "68 г", "Плата BMS": "Встроена в шлейф" },
+          connections: ["Battery Ribbon → PMIC на материнской плате"],
+          failureImpact: "Если батарея не подключена к плате управления, смартфон не включается.",
+          layerOrder: 1,
+          assembledPosition: [0, 0.28, -0.6],
+          explodedPosition: [0, -1.2, -0.6],
+          dimensions: [3.4, 0.4, 4.8],
+          meshType: "phone_battery"
+        },
+        {
+          id: "phone-part-usbc",
+          name: "USB Type-C 3.2 Gen2 Port (65W Fast Charge)",
+          category: "Connectivity",
+          subsystem: "POWER",
+          purpose: "Физический интерфейс для подключения зарядного устройства, передачи данных на ПК и OTG-аксессуаров.",
+          inputs: ["Кабель USB-C от 5V до 20V"],
+          outputs: ["Шина VBUS на контроллер зарядки", "Дифференциальные пары данных D+/D- и SuperSpeed"],
+          powerSpecs: { voltage: "5V / 9V / 12V / 20V", current: "до 3.25A (65W Power Delivery)" },
+          parameters: { "Контактов": 24, "Ресурс": "10 000 подключений", "Водозащита": "Герметичная прокладка" },
+          connections: ["USB-C → PMIC / Charging IC"],
+          failureImpact: "Поломка порта делает невозможной кабельную зарядку и проводную прошивку.",
+          layerOrder: 1,
+          assembledPosition: [0, 0.22, 3.8],
+          explodedPosition: [0, -1.0, 4.8],
+          dimensions: [1.2, 0.3, 0.8],
+          meshType: "phone_usbc"
+        }
+      ]
+    },
+    {
+      id: "phone-sub-mainboard",
+      name: "MAINBOARD & SOC (Материнская плата)",
+      category: "Control",
+      description: "Высокоплотная многослойная HDI-плата с процессором SoC, оперативной памятью, накопителем и PMIC.",
+      parts: [
+        {
+          id: "phone-part-motherboard",
+          name: "HDI Motherboard (Материнская плата с SoC и PMIC)",
+          category: "Control",
+          subsystem: "MAINBOARD",
+          purpose: "Главная электронная плата. Несет на себе процессор SoC, память LPDDR5, UFS 4.0 хранилище и контроллер питания PMIC.",
+          inputs: ["V_BAT от аккумулятора", "Данные от сенсоров, камер, микрофона"],
+          outputs: ["Управление дисплеем, аудио, передатчиками 5G/Wi-Fi"],
+          powerSpecs: { voltage: "3.85V вход, вторичные шины 0.8V, 1.1V, 1.8V, 3.3V", current: "до 6A пик" },
+          parameters: {
+            "Процессор (SoC)": "Octa-Core 3.2GHz 4nm (CPU + GPU + NPU)",
+            "Память (RAM)": "12GB LPDDR5X (8533 Мбит/с)",
+            "Накопитель": "256GB UFS 4.0 (чтение до 4200 МБ/с)",
+            "PMIC": "Многоканальный импульсный контроллер питания",
+            "Слоев PCB": 12
+          },
+          connections: ["Motherboard ↔ Battery, Display, Cameras, Speaker"],
+          failureImpact: "Выход из строя материнской платы приводит к полному 'окирпичиванию' смартфона.",
+          layerOrder: 3,
+          assembledPosition: [0, 0.28, 1.8],
+          explodedPosition: [0, 1.2, 1.8],
+          dimensions: [3.8, 0.3, 3.0],
+          meshType: "phone_motherboard"
+        }
+      ]
+    },
+    {
+      id: "phone-sub-av",
+      name: "CAMERAS & AUDIO (Камеры и мультимедиа)",
+      category: "Sensor",
+      description: "Тройной блок камер высокого разрешения, стереодинамик и студийный микрофон MEMS.",
+      parts: [
+        {
+          id: "phone-part-cameras",
+          name: "Тройной блок камер (50MP Главная OIS + 12MP Ультраширик + 10MP Телефото)",
+          category: "Sensor",
+          subsystem: "CAMERAS",
+          purpose: "Преобразует свет в цифровое изображение через оптические сенсоры и передает поток RAW данных в ISP процессор.",
+          inputs: ["Свет через оптические линзы", "Питание 2.8V / 1.8V от PMIC"],
+          outputs: ["Шина MIPI CSI-2 (высокоскоростной видеопоток) на SoC"],
+          powerSpecs: { voltage: "2.8V аналог, 1.8V логика", current: "до 450 мА при съемке 4K 60fps" },
+          parameters: { "Главный сенсор": "1/1.3\" 50MP Dual Pixel OIS", "Оптический зум": "3x", "Автофокус": "Лазерный" },
+          connections: ["Camera Module → SoC (MIPI CSI)"],
+          failureImpact: "Приложение камеры показывает ошибку или темный экран.",
+          layerOrder: 3,
+          assembledPosition: [1.0, 0.45, 2.5],
+          explodedPosition: [1.0, 2.0, 3.2],
+          dimensions: [2.0, 0.6, 2.2],
+          meshType: "phone_camera"
+        },
+        {
+          id: "phone-part-flash",
+          name: "Двухтоновая LED-вспышка / Фонарик (True Tone)",
+          category: "Actuator",
+          subsystem: "CAMERAS",
+          purpose: "Сверхъяркий светодиодный модуль подсветки для фотосъемки и фонарика (GaN CSP диоды, 120 люмен).",
+          inputs: ["Управляющий импульс и питание от драйвера вспышки на плате"],
+          outputs: ["Световой поток высокой цветопередачи CRI > 95"],
+          powerSpecs: { voltage: "3.3V", current: "до 600 мА в режиме фонарика, до 1.5A импульс вспышки" },
+          parameters: { "Цветовая температура": "3000K / 5500K", "Управление": "ШИМ PMIC", "Яркость": "120 лм" },
+          connections: ["Motherboard (Flash Ctrl) → Flashlight Module"],
+          failureImpact: "Фонарик в шторке смартфона не светит, снимки в темноте черные.",
+          layerOrder: 3,
+          assembledPosition: [1.0, 0.45, 1.0],
+          explodedPosition: [1.0, 2.0, 1.4],
+          dimensions: [0.8, 0.3, 0.8],
+          meshType: "phone_flash"
+        },
+        {
+          id: "phone-part-speaker",
+          name: "Стереодинамик ультралинейный с резонансной камерой",
+          category: "Actuator",
+          subsystem: "AUDIO",
+          purpose: "Преобразует аналоговый звуковой сигнал от аудиочипа в слышимые акустические колебания воздуха.",
+          inputs: ["Звуковой дифференциальный сигнал от Smart PA усилителя"],
+          outputs: ["Звуковые волны (до 88 дБА SPL)"],
+          powerSpecs: { voltage: "до 8V RMS с повышающего драйвера", current: "пиковая мощность 2.5W" },
+          parameters: { "Частотный диапазон": "150 Гц - 20 000 Гц", "Объем камеры": "1.0 куб.см" },
+          connections: ["Audio Codec → Speaker"],
+          failureImpact: "Смартфон работает в режиме без звука, нет рингтона и громкой связи.",
+          layerOrder: 1,
+          assembledPosition: [-1.2, 0.22, 3.8],
+          explodedPosition: [-1.8, -1.0, 4.8],
+          dimensions: [1.4, 0.4, 1.0],
+          meshType: "phone_speaker"
+        }
+      ]
+    }
+  ],
+  assemblyChecklist: [
+    {
+      step: 1,
+      title: "Шаг 1: Установка шасси и материнской платы",
+      requiredParts: [
+        "phone-part-midframe",
+        "phone-part-motherboard",
+      ],
+      description: "Установка несущего алюминиевого шасси (Midframe) на рабочий стол и фиксация многослойной материнской платы с процессором SoC и контроллером PMIC.",
+      wiringInstructions: [],
+    },
+    {
+      step: 2,
+      title: "Шаг 2: Установка аккумулятора и подключение питания",
+      requiredParts: ["phone-part-battery", "phone-part-motherboard"],
+      description: "Монтаж плоской литий-ионной ячейки 5000мА·ч в посадочный отсек рамы и подключение силовой линии питания (VBAT и GND) к контроллеру PMIC.",
+      wiringInstructions: [
+        {
+          id: "phone-w-bat-mb-pos",
+          wireColor: "red",
+          colorNameRu: "Красный",
+          fromPartId: "phone-part-battery",
+          fromPinId: "pos",
+          fromLabel: "Аккумулятор [pos / +3.85В]",
+          toPartId: "phone-part-motherboard",
+          toPinId: "vbat_in",
+          toLabel: "Материнская плата [vbat_in]",
+          wireType: "Силовой провод VCC (+3.85V)",
+          instructionText: "Соедините плюсовой контакт батареи (pos) со входом питания VBAT платы красным проводом сечением 0.5 мм².",
+        },
+        {
+          id: "phone-w-bat-mb-neg",
+          wireColor: "black",
+          colorNameRu: "Черный",
+          fromPartId: "phone-part-battery",
+          fromPinId: "neg",
+          fromLabel: "Аккумулятор [neg / GND]",
+          toPartId: "phone-part-motherboard",
+          toPinId: "gnd",
+          toLabel: "Материнская плата [gnd]",
+          wireType: "Провод заземления GND",
+          instructionText: "Соедините отрицательный контакт батареи (neg) с общей землей GND материнской платы черным проводом.",
+        },
+      ],
+    },
+    {
+      step: 3,
+      title: "Шаг 3: Нижний субмодуль — порт USB-C и динамик",
+      requiredParts: ["phone-part-usbc", "phone-part-speaker", "phone-part-motherboard"],
+      description: "Монтаж разъема быстрой зарядки USB-PD и ультралинейного стереодинамика с подключением к материнской плате.",
+      wiringInstructions: [
+        {
+          id: "phone-w-mb-spk",
+          wireColor: "purple",
+          colorNameRu: "Фиолетовый",
+          fromPartId: "phone-part-motherboard",
+          fromPinId: "spk_out",
+          fromLabel: "Материнская плата [spk_out]",
+          toPartId: "phone-part-speaker",
+          toPinId: "spk_p",
+          toLabel: "Динамик [spk_p (+)]",
+          wireType: "Аудиосигнальный провод SPK+",
+          instructionText: "Подключите выход усилителя звука (spk_out) к плюсовому контакту динамика (spk_p) фиолетовым проводом.",
+        },
+        {
+          id: "phone-w-usbc-mb",
+          wireColor: "red",
+          colorNameRu: "Красный",
+          fromPartId: "phone-part-usbc",
+          fromPinId: "vbus",
+          fromLabel: "Порт USB-C [vbus]",
+          toPartId: "phone-part-motherboard",
+          toPinId: "vbus_in",
+          toLabel: "Контроллер заряда [vbus_in]",
+          wireType: "Шина быстрой зарядки USB 5V/9V",
+          instructionText: "Подключите шину питания USB-C (vbus) ко входу контроллера заряда (vbus_in) материнской платы красным проводом.",
+        },
+      ],
+    },
+    {
+      step: 4,
+      title: "Шаг 4: Установка блока камер 50MP и LED-вспышки",
+      requiredParts: ["phone-part-cameras", "phone-part-flash", "phone-part-motherboard"],
+      description: "Монтаж тройного блока сенсоров 50MP OIS по скоростной шине MIPI CSI и модуля двухтоновой вспышки.",
+      wiringInstructions: [
+        {
+          id: "phone-w-mb-cam",
+          wireColor: "cyan",
+          colorNameRu: "Бирюзовый (Cyan)",
+          fromPartId: "phone-part-motherboard",
+          fromPinId: "cam_in",
+          fromLabel: "Материнская плата [cam_in (ISP)]",
+          toPartId: "phone-part-cameras",
+          toPinId: "mipi",
+          toLabel: "Блок камер [mipi (CSI)]",
+          wireType: "Высокоскоростной гибкий шлейф MIPI CSI",
+          instructionText: "Соедините видеопроцессор ISP материнской платы (cam_in) с разъемом блока камер (mipi) бирюзовым шлейфом передачи кадров 4K.",
+        },
+        {
+          id: "phone-w-mb-flash",
+          wireColor: "orange",
+          colorNameRu: "Оранжевый",
+          fromPartId: "phone-part-motherboard",
+          fromPinId: "flash_out",
+          fromLabel: "Материнская плата [flash_out]",
+          toPartId: "phone-part-flash",
+          toPinId: "ctrl",
+          toLabel: "Модуль вспышки [ctrl]",
+          wireType: "Сигнальный провод драйвера светодиода",
+          instructionText: "Подключите контакт управления вспышкой (flash_out) к драйверу светодиода (ctrl) оранжевым проводом.",
+        },
+      ],
+    },
+    {
+      step: 5,
+      title: "Шаг 5: Подключение AMOLED дисплея 120 Гц LTPO",
+      requiredParts: ["phone-part-oled", "phone-part-motherboard"],
+      description: "Установка фронтальной панели: гибкая матрица AMOLED 120Гц с тачскрином и подключение шлейфа MIPI DSI.",
+      wiringInstructions: [
+        {
+          id: "phone-w-mb-disp",
+          wireColor: "yellow",
+          colorNameRu: "Желтый",
+          fromPartId: "phone-part-motherboard",
+          fromPinId: "disp_out",
+          fromLabel: "Материнская плата [disp_out]",
+          toPartId: "phone-part-oled",
+          toPinId: "mipi",
+          toLabel: "AMOLED Дисплей [mipi]",
+          wireType: "Плоский экранный шлейф FPC (MIPI DSI 120Hz)",
+          instructionText: "Соедините видеовыход процессора дисплея (disp_out) со шлейфом панели AMOLED (mipi) желтым плоским шлейфом.",
+        },
+      ],
+    },
+    {
+      step: 6,
+      title: "Шаг 6: Фиксация задней панели Gorilla Glass и запуск",
+      requiredParts: ["phone-part-backcover"],
+      description: "Финальная герметизация корпуса: установка задней панели из закаленного стекла Gorilla Glass Victus и запуск симуляции смартфона.",
+      wiringInstructions: [],
+    },
+  ]
+};
+
+// =========================================================================
+// 3. AUTONOMOUS ROBOT ARCHITECTURE (Раздел 34 ТЗ)
+// =========================================================================
+export const ROBOT_ARCHITECTURE: CompleteDeviceArchitecture = {
+  id: "device-robot-pro",
+  name: "Autonomous Differential Drive Robot",
+  codeName: "CyberRover Explorer",
+  category: "Robotics",
+  description: "Двухколесный колесный робот с дифференциальным приводом, драйвером двигателей L298N H-Bridge, ультразвуковым радаром HC-SR04, сервоприводом панорамирования и аккумулятором 7.4V.",
+  weightGrams: 850,
+  nominalVoltageV: 7.4,
+  maxPowerW: 35,
+  subsystems: [
+    {
+      id: "bot-sub-chassis",
+      name: "CHASSIS & MECHANICS",
+      category: "Mechanical",
+      description: "Акриловое или алюминиевое двухъярусное шасси с опорным роликом caster wheel.",
+      parts: [
+        {
+          id: "bot-part-chassis",
+          name: "Двухъярусное шасси робота + Caster",
+          category: "Mechanical",
+          subsystem: "CHASSIS",
+          purpose: "Несет все компоненты робота, моторы, контроллер и датчики.",
+          inputs: ["Механическая фиксация"],
+          outputs: ["Стабильная колесная база"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: { "Материал": "Акрил 4мм / Алюминий", "Диаметр колес": "65 мм", "Клиренс": "18 мм" },
+          connections: ["Шасси удерживает Моторы и Платы"],
+          failureImpact: "Поломка колеса приводит к блокировке перемещения.",
+          layerOrder: 1,
+          assembledPosition: [0, 0.4, 0],
+          explodedPosition: [0, 0.4, 0],
+          dimensions: [6.0, 0.4, 7.0],
+          meshType: "robot_chassis"
+        }
+      ]
+    },
+    {
+      id: "bot-sub-power",
+      name: "POWER MANAGEMENT",
+      category: "Power",
+      description: "Аккумуляторный блок 2S 7.4V с выключателем и преобразователем питания.",
+      parts: [
+        {
+          id: "bot-part-battery",
+          name: "2S Li-Po 7.4V 2200mAh Battery Pack",
+          category: "Power",
+          subsystem: "POWER",
+          purpose: "Обеспечивает питание тяговых моторов (7.4V) и электроники управления.",
+          inputs: ["Зарядное устройство 8.4V"],
+          outputs: ["7.4V силовая линия на L298N и Arduino Vin"],
+          powerSpecs: { voltage: "7.4V", current: "до 25A пик" },
+          parameters: { "Емкость": "2200 мА·ч", "Масса": "115 г" },
+          connections: ["Battery → L298N Motor Driver, Arduino Vin"],
+          failureImpact: "Без питания робот полностью неподвижен.",
+          layerOrder: 0,
+          assembledPosition: [0, 0.8, -1.8],
+          explodedPosition: [0, -1.8, -2.5],
+          dimensions: [3.5, 1.2, 1.8],
+          meshType: "robot_battery"
+        }
+      ]
+    },
+    {
+      id: "bot-sub-control",
+      name: "CONTROLLER & DRIVER",
+      category: "Control",
+      description: "Микроконтроллерный мозг Arduino / ESP32 и силовой H-мост L298N.",
+      parts: [
+        {
+          id: "bot-part-mcu",
+          name: "Arduino Uno R3 (Управляющий контроллер)",
+          category: "Control",
+          subsystem: "CONTROLLER",
+          purpose: "Обрабатывает показания сонара, вычисляет траекторию движения и формирует PWM сигналы управления моторами.",
+          inputs: ["7.4V на пин VIN", "Эхо-сигнал от сонара HC-SR04"],
+          outputs: ["PWM сигналы скорости на L298N", "Управление сервоприводом радара"],
+          powerSpecs: { voltage: "5V внутр (7-12V на Vin)", current: "45 мА" },
+          parameters: { "MCU": "ATmega328P 16MHz", "Flash": "32KB", "GPIO": 14 },
+          connections: ["Arduino → L298N Driver", "Sonar → Arduino"],
+          failureImpact: "Зависание программы приводит к неуправляемому столкновению с препятствиями.",
+          layerOrder: 2,
+          assembledPosition: [0, 1.2, 0.6],
+          explodedPosition: [0, 2.2, 0.6],
+          dimensions: [3.2, 0.8, 2.4],
+          meshType: "arduino_uno"
+        },
+        {
+          id: "bot-part-driver",
+          name: "L298N Dual H-Bridge Motor Driver",
+          category: "Actuator",
+          subsystem: "DRIVER",
+          purpose: "Управляет направлением вращения и скоростью двух коллекторных редукторных моторов токами до 2А.",
+          inputs: ["7.4V силовое от батареи", "4x логических входа направления IN1-IN4 от Arduino", "2x ШИМ ENA/ENB"],
+          outputs: ["OUT1/OUT2 на левый мотор", "OUT3/OUT4 на правый мотор"],
+          powerSpecs: { voltage: "7.4V силовое, 5V логика", current: "до 2A на канал" },
+          parameters: { "Тип": "Двойной H-мост", "Радиатор": "Алюминиевый ребристый", "Диоды защиты": "Шоттки" },
+          connections: ["Arduino → L298N → Motors"],
+          failureImpact: "При пробое транзисторов драйвера один или оба мотора перестают вращаться.",
+          layerOrder: 2,
+          assembledPosition: [0, 0.8, -0.6],
+          explodedPosition: [0, 2.0, -1.2],
+          dimensions: [2.5, 1.4, 2.5],
+          meshType: "relay_5v"
+        }
+      ]
+    },
+    {
+      id: "bot-sub-propulsion",
+      name: "MOTORS & WHEELS",
+      category: "Propulsion",
+      description: "Редукторные двигатели постоянного тока и резиновые колеса высокого сцепления.",
+      parts: [
+        {
+          id: "bot-part-motor-left",
+          name: "TT Gearmotor (Левый привод 1:48)",
+          category: "Actuator",
+          subsystem: "PROPULSION",
+          purpose: "Вращает левое колесо робота с пониженной скоростью и повышенным крутящим моментом.",
+          inputs: ["Биполярное напряжение от L298N OUT1/OUT2"],
+          outputs: ["Вращение вала левого колеса"],
+          powerSpecs: { voltage: "3V - 9V", current: "до 800 мА под нагрузкой" },
+          parameters: { "Редукция": "1:48", "Обороты": "200 RPM", "Момент": "0.8 кг·см" },
+          connections: ["L298N → Левый мотор → Левое колесо"],
+          failureImpact: "Робот начинает кружиться на месте при отказе одного мотора.",
+          layerOrder: 1,
+          assembledPosition: [-2.8, 0.4, 0],
+          explodedPosition: [-4.2, 0.4, 0],
+          dimensions: [1.2, 1.2, 2.4],
+          meshType: "dc_motor"
+        },
+        {
+          id: "bot-part-motor-right",
+          name: "TT Gearmotor (Правый привод 1:48)",
+          category: "Actuator",
+          subsystem: "PROPULSION",
+          purpose: "Вращает правое колесо робота.",
+          inputs: ["Биполярное напряжение от L298N OUT3/OUT4"],
+          outputs: ["Вращение вала правого колеса"],
+          powerSpecs: { voltage: "3V - 9V", current: "до 800 мА" },
+          parameters: { "Редукция": "1:48", "Обороты": "200 RPM", "Момент": "0.8 кг·см" },
+          connections: ["L298N → Правый мотор → Правое колесо"],
+          failureImpact: "Отказ мотора нарушает движение по курсу.",
+          layerOrder: 1,
+          assembledPosition: [2.8, 0.4, 0],
+          explodedPosition: [4.2, 0.4, 0],
+          dimensions: [1.2, 1.2, 2.4],
+          meshType: "dc_motor"
+        }
+      ]
+    },
+    {
+      id: "bot-sub-sensors",
+      name: "SENSORS & SCANNER",
+      category: "Sensor",
+      description: "Ультразвуковой дальномер HC-SR04 на сканирующем сервоприводе SG90.",
+      parts: [
+        {
+          id: "bot-part-sonar",
+          name: "HC-SR04 Ультразвуковой радар + Сервопривод",
+          category: "Sensor",
+          subsystem: "SENSORS",
+          purpose: "Излучает ультразвуковые импульсы 40кГц и измеряет время возврата эха, определяя дистанцию до препятствий от 2 см до 400 см.",
+          inputs: ["Питание 5V", "Импульс Trigger от Arduino"],
+          outputs: ["Импульс Echo (длительность пропорциональна дистанции)"],
+          powerSpecs: { voltage: "5.0V", current: "15 мА" },
+          parameters: { "Диапазон": "2 см - 400 см", "Точность": "0.3 см", "Угол обзора": "15°" },
+          connections: ["Sonar → Arduino"],
+          failureImpact: "Робот врезается в стены и препятствия.",
+          layerOrder: 3,
+          assembledPosition: [0, 1.8, 2.8],
+          explodedPosition: [0, 3.2, 4.0],
+          dimensions: [2.2, 1.2, 1.2],
+          meshType: "ultrasonic_sensor"
+        }
+      ]
+    }
+  ],
+  assemblyChecklist: [
+    {
+      step: 1,
+      title: "Шаг 1: Монтаж платформы шасси и контроллеров",
+      requiredParts: [
+        "bot-part-chassis",
+        "bot-part-driver",
+        "bot-part-mcu",
+      ],
+      description: "Установка базовой двухъярусной платформы мобильного робота, монтаж платы микроконтроллера Arduino Uno R3 и силового драйвера моторов L298N.",
+      wiringInstructions: [],
+    },
+    {
+      step: 2,
+      title: "Шаг 2: Силовая шина питания (Аккумулятор 7.4V ➜ Драйвер L298N)",
+      requiredParts: ["bot-part-battery", "bot-part-driver"],
+      description: "Подключение силовой батареи 7.4V к винтовым клеммам VIN и GND драйвера моторов L298N.",
+      wiringInstructions: [
+        {
+          id: "bot-w-bat-drv-pos",
+          wireColor: "red",
+          colorNameRu: "Красный",
+          fromPartId: "bot-part-battery",
+          fromPinId: "pos",
+          fromLabel: "Аккумулятор [VCC (+7.4V)]",
+          toPartId: "bot-part-driver",
+          toPinId: "vin",
+          toLabel: "Драйвер L298N [VIN]",
+          wireType: "Силовой провод VCC (+7.4V)",
+          instructionText: "Подключите плюсовой вывод батареи к клемме VIN драйвера моторов L298N красным проводом.",
+        },
+        {
+          id: "bot-w-bat-drv-neg",
+          wireColor: "black",
+          colorNameRu: "Черный",
+          fromPartId: "bot-part-battery",
+          fromPinId: "neg",
+          fromLabel: "Аккумулятор [GND]",
+          toPartId: "bot-part-driver",
+          toPinId: "gnd",
+          toLabel: "Драйвер L298N [GND]",
+          wireType: "Провод заземления GND",
+          instructionText: "Подключите минусовой вывод батареи к клемме GND драйвера L298N черным проводом.",
+        },
+      ],
+    },
+    {
+      step: 3,
+      title: "Шаг 3: Питание логики контроллера (Драйвер L298N 5V ➜ Arduino Uno)",
+      requiredParts: ["bot-part-driver", "bot-part-mcu"],
+      description: "Подача стабилизированного напряжения 5V со встроенного регулятора L298N на питание платы Arduino и объединение общей земли.",
+      wiringInstructions: [
+        {
+          fromPartId: "bot-part-driver",
+          fromPinId: "5v",
+          fromLabel: "Драйвер L298N [5V Out]",
+          wireColor: "red",
+          wireColorName: "Красный",
+          toPartId: "bot-part-mcu",
+          toPinId: "5v",
+          toLabel: "Arduino [5V In]",
+          wireType: "Питание логики 5.0V",
+          instructionText: "Подключите стабилизированный выход 5V драйвера L298N к пину 5V платы Arduino красным проводом.",
+        },
+        {
+          fromPartId: "bot-part-driver",
+          fromPinId: "gnd",
+          fromLabel: "Драйвер L298N [GND]",
+          wireColor: "black",
+          wireColorName: "Черный",
+          toPartId: "bot-part-mcu",
+          toPinId: "gnd",
+          toLabel: "Arduino [GND]",
+          wireType: "Общая масса GND",
+          instructionText: "Объедините земляные контакты драйвера и Arduino черным проводом для создания единой опорной земли.",
+        },
+      ],
+    },
+    {
+      step: 4,
+      title: "Шаг 4: Подключение тяговых электродвигателей",
+      requiredParts: ["bot-part-driver", "bot-part-motor-left", "bot-part-motor-right"],
+      description: "Подключение силовых выводов моторов к винтовым клеммникам OUT1/OUT2 и OUT3/OUT4 драйвера.",
+      wiringInstructions: [
+        {
+          fromPartId: "bot-part-driver",
+          fromPinId: "out1",
+          fromLabel: "Драйвер [OUT1]",
+          wireColor: "blue",
+          wireColorName: "Синий",
+          toPartId: "bot-part-motor-left",
+          toPinId: "pos",
+          toLabel: "Левый мотор [M+]",
+          wireType: "Силовая фаза левого двигателя",
+          instructionText: "Подключите клемму OUT1 драйвера к положительному выводу левого мотор-редуктора синим проводом.",
+        },
+        {
+          fromPartId: "bot-part-driver",
+          fromPinId: "out3",
+          fromLabel: "Драйвер [OUT3]",
+          wireColor: "yellow",
+          wireColorName: "Желтый",
+          toPartId: "bot-part-motor-right",
+          toPinId: "pos",
+          toLabel: "Правый мотор [M+]",
+          wireType: "Силовая фаза правого двигателя",
+          instructionText: "Подключите клемму OUT3 драйвера к положительному выводу правого мотор-редуктора желтым проводом.",
+        },
+      ],
+    },
+    {
+      step: 5,
+      title: "Шаг 5: Монтаж и подключение ультразвукового сонара HC-SR04",
+      requiredParts: ["bot-part-mcu", "bot-part-sonar"],
+      description: "Подключение сигнальных линий Trigger/Echo дальномера к цифровым портам микроконтроллера и подача питания 5V.",
+      wiringInstructions: [
+        {
+          fromPartId: "bot-part-mcu",
+          fromPinId: "5v",
+          fromLabel: "Arduino [5V]",
+          wireColor: "red",
+          wireColorName: "Красный",
+          toPartId: "bot-part-sonar",
+          toPinId: "vcc",
+          toLabel: "Сонар HC-SR04 [VCC]",
+          wireType: "Питание сонара +5V",
+          instructionText: "Подайте питание 5V с Arduino на контакт VCC ультразвукового сонара красным проводом.",
+        },
+        {
+          fromPartId: "bot-part-mcu",
+          fromPinId: "gnd",
+          fromLabel: "Arduino [GND]",
+          wireColor: "black",
+          wireColorName: "Черный",
+          toPartId: "bot-part-sonar",
+          toPinId: "gnd",
+          toLabel: "Сонар HC-SR04 [GND]",
+          wireType: "Земляной провод GND",
+          instructionText: "Соедините пин GND Arduino и GND сонара черным проводом.",
+        },
+      ],
+    },
+    {
+      step: 6,
+      title: "Шаг 6: Финальная автокалибровка и ходовые испытания",
+      requiredParts: ["bot-part-chassis"],
+      description: "Проверка симметрии тяги моторов, сканирования препятствий и запуск автономного алгоритма.",
+      wiringInstructions: [],
+    },
+  ]
+};
+
+// =========================================================================
+// 4. HUMANOID BIPEDAL ROBOT ARCHITECTURE (CyberHumanoid Apex-1)
+// =========================================================================
+export const HUMANOID_ARCHITECTURE: CompleteDeviceArchitecture = {
+  id: "device-humanoid",
+  name: "Humanoid Bipedal Robot",
+  codeName: "CyberHumanoid Apex-1",
+  category: "Robotics",
+  description: "Полноразмерный антропоморфный двуногий робот-гуманоид с 18 степенями свободы (DoF): торс с инерциальной навигацией IMU, бинокулярная голова со стерео-камерами глубины RGB-D, 3-DoF манипуляторы рук, опорные ноги с квази-прямыми приводами QDD и датчиками баланса стоп ZMP, тяговая LiPo батарея 24V 5000mAh.",
+  testScenario: {
+    name: "Динамическая ходьба по пересеченной местности и манипуляции с грузом 5 кг",
+    ambientTempC: 22,
+    stressProfile: "Bipedal Trot & Stair Climbing (Пиковые ударные токи до 35А на коленные приводы)",
+    targetDurationMinutes: 60,
+  },
+  subsystems: [
+    {
+      id: "humanoid-sub-chassis",
+      name: "CHASSIS & TORSO (Торс и силовой экзоскелет)",
+      category: "Mechanical",
+      description: "Каркас торса из титана и карбона с шарнирными соединениями и встроенным блоком распределения питания (PDB).",
+      parts: [
+        {
+          id: "humanoid-torso-main",
+          name: "Торс и Каркас Гуманоида",
+          category: "Mechanical",
+          subsystem: "CHASSIS",
+          purpose: "Несущий каркас робота: вмещает центральный процессор реального времени, шину CAN-FD, датчик положения IMU и систему распределения питания.",
+          inputs: ["Силовое питание 24V", "Шина CAN-FD", "Видеопоток от головы"],
+          outputs: ["Шины управления приводами рук и ног", "Стабилизированное питание 5V/12V"],
+          powerSpecs: { voltage: "24.0V", current: "до 50А в пике" },
+          parameters: { "Материал": "Титановый сплав Ti-6Al-4V + Углепластик", "Степеней свободы": "18 DoF", "IMU": "9-осевой Bosch BMI088" },
+          connections: ["Торс → Руки", "Торс → Ноги", "Торс → Голова", "Торс → Батарея"],
+          failureImpact: "Полный отказ робота и потеря статического равновесия.",
+          layerOrder: 1,
+          assembledPosition: [0, 0, 0],
+          explodedPosition: [0, 0, 0],
+          dimensions: [2.0, 3.2, 1.4],
+          meshType: "humanoid_torso",
+        }
+      ]
+    },
+    {
+      id: "humanoid-sub-power",
+      name: "POWER SYSTEM (Силовая энергоустановка)",
+      category: "Power",
+      description: "Высокотоковая 6S LiPo батарея 24V с интегрированной платой защиты BMS.",
+      parts: [
+        {
+          id: "humanoid-batt",
+          name: "Силовой LiPo Блок 24V 5000mAh",
+          category: "Power",
+          subsystem: "POWER",
+          purpose: "Обеспечивает автономное питание робота с токоотдачей до 60C для компенсации ударных бросков тока при прыжках и подъеме по лестницам.",
+          inputs: ["Вход зарядного устройства"],
+          outputs: ["Силовая шина 24V (XT90-S с защитой от искры)"],
+          powerSpecs: { voltage: "24.0V DC (6S)", current: "до 60А постоянный / 120А пик" },
+          parameters: { "Емкость": "5000 мА·ч", "Энергоемкость": "120 Вт·ч", "Масса": "850 г" },
+          connections: ["Батарея → Торс"],
+          failureImpact: "Обесточивание всех приводов и экстренное аварийное падение.",
+          layerOrder: 2,
+          assembledPosition: [0, 1.4, -1.2],
+          explodedPosition: [0, 1.4, -2.8],
+          dimensions: [1.6, 0.9, 1.1],
+          meshType: "battery_lipo",
+        }
+      ]
+    },
+    {
+      id: "humanoid-sub-control",
+      name: "VISION & COMPUTING (Бинокулярное зрение и ИИ-голова)",
+      category: "Sensor",
+      description: "Сенсорная голова с бинокулярными RGB-D стерео-камерами, ToF дальномером и микрофонной решеткой.",
+      parts: [
+        {
+          id: "humanoid-head-main",
+          name: "Голова и Стерео-Камеры",
+          category: "Sensor",
+          subsystem: "VISION",
+          purpose: "Генерирует плотное 3D облако точек пространства, распознает препятствия, людей и целевые объекты для манипуляций.",
+          inputs: ["Питание 5V 3A", "Шина синхронизации кадров"],
+          outputs: ["Видеопоток стереозрения (USB 3.2 Gen 2 / MIPI)", "ToF карта глубины"],
+          powerSpecs: { voltage: "5.0V", current: "1.8А" },
+          parameters: { "Разрешение": "2x 1920×1080 @ 60fps", "ToF диапазон": "0.2–6.0 м", "NPU": "32 TOPS" },
+          connections: ["Голова → Торс"],
+          failureImpact: "Робот слепнет, не видит препятствия и не может строить маршрут.",
+          layerOrder: 3,
+          assembledPosition: [0, 3.4, 0],
+          explodedPosition: [0, 5.2, 0],
+          dimensions: [1.2, 1.4, 1.2],
+          meshType: "humanoid_head",
+        }
+      ]
+    },
+    {
+      id: "humanoid-sub-actuators-arms",
+      name: "MANIPULATORS (Манипуляторы верхних конечностей)",
+      category: "Actuator",
+      description: "Левый и правый манипуляторы с высокоточными сервоприводами плеча, локтя и запястья.",
+      parts: [
+        {
+          id: "humanoid-arm-l",
+          name: "Левая Рука (3-DoF)",
+          category: "Actuator",
+          subsystem: "MANIPULATORS",
+          purpose: "Выполняет захват, подъем и перемещение предметов массой до 5 кг с контролем усилия.",
+          inputs: ["Силовое питание 12V", "Шина данных CAN-FD"],
+          outputs: ["Телеметрия углов энкодеров и моментов"],
+          powerSpecs: { voltage: "12.0V", current: "до 8А" },
+          parameters: { "Суставов": "3-DoF", "Крутящий момент": "18 Н·м", "Грузоподъемность": "5 кг" },
+          connections: ["Левая рука → Торс"],
+          failureImpact: "Отказ манипуляций левой конечности.",
+          layerOrder: 4,
+          assembledPosition: [-2.2, 1.0, 0],
+          explodedPosition: [-4.2, 1.0, 0],
+          dimensions: [1.0, 3.0, 1.0],
+          meshType: "humanoid_arm_left",
+        },
+        {
+          id: "humanoid-arm-r",
+          name: "Правая Рука (3-DoF)",
+          category: "Actuator",
+          subsystem: "MANIPULATORS",
+          purpose: "Выполняет синхронные прецизионные действия правой рукой параллельно с левой конечностью.",
+          inputs: ["Силовое питание 12V", "Шина данных CAN-FD"],
+          outputs: ["Телеметрия углов энкодеров и моментов"],
+          powerSpecs: { voltage: "12.0V", current: "до 8А" },
+          parameters: { "Суставов": "3-DoF", "Крутящий момент": "18 Н·м", "Грузоподъемность": "5 кг" },
+          connections: ["Правая рука → Торс"],
+          failureImpact: "Отказ манипуляций правой конечности.",
+          layerOrder: 4,
+          assembledPosition: [2.2, 1.0, 0],
+          explodedPosition: [4.2, 1.0, 0],
+          dimensions: [1.0, 3.0, 1.0],
+          meshType: "humanoid_arm_right",
+        }
+      ]
+    },
+    {
+      id: "humanoid-sub-actuators-legs",
+      name: "LOCOMOTION (Опорно-двигательные конечности)",
+      category: "Actuator",
+      description: "Нижние конечности с квази-прямыми приводами (QDD) тазобедренных, коленных суставов и амортизирующими стопами с ZMP-датчиками.",
+      parts: [
+        {
+          id: "humanoid-leg-l",
+          name: "Левая Нога (QDD Knee + Ankle)",
+          category: "Actuator",
+          subsystem: "LOCOMOTION",
+          purpose: "Обеспечивает опорную тягу при ходьбе, поглощает удары о грунт и генерирует выталкивающий импульс.",
+          inputs: ["Силовое питание 24V", "Шина CAN-FD", "Сигналы тензодатчиков"],
+          outputs: ["Телеметрия ZMP-давления стопы и угловой скорости"],
+          powerSpecs: { voltage: "24.0V", current: "до 25А" },
+          parameters: { "Приводы": "Квази-прямой привод QDD (6:1)", "Крутящий момент колена": "75 Н·м", "Датчики": "6-осевой датчик силы стопы" },
+          connections: ["Левая нога → Торс"],
+          failureImpact: "Потеря способности стоять на двух ногах и хромота.",
+          layerOrder: 5,
+          assembledPosition: [-0.9, -2.8, 0],
+          explodedPosition: [-2.2, -4.6, 0],
+          dimensions: [1.1, 3.6, 1.2],
+          meshType: "humanoid_leg_left",
+        },
+        {
+          id: "humanoid-leg-r",
+          name: "Правая Нога (QDD Knee + Ankle)",
+          category: "Actuator",
+          subsystem: "LOCOMOTION",
+          purpose: "Синхронно работает в фазе переноса и опоры bipedal походки робота-гуманоида.",
+          inputs: ["Силовое питание 24V", "Шина CAN-FD", "Сигналы тензодатчиков"],
+          outputs: ["Телеметрия ZMP-давления стопы и угловой скорости"],
+          powerSpecs: { voltage: "24.0V", current: "до 25А" },
+          parameters: { "Приводы": "Квази-прямой привод QDD (6:1)", "Крутящий момент колена": "75 Н·м", "Датчики": "6-осевой датчик силы стопы" },
+          connections: ["Правая нога → Торс"],
+          failureImpact: "Потеря способности стоять на двух ногах и хромота.",
+          layerOrder: 5,
+          assembledPosition: [0.9, -2.8, 0],
+          explodedPosition: [2.2, -4.6, 0],
+          dimensions: [1.1, 3.6, 1.2],
+          meshType: "humanoid_leg_right",
+        }
+      ]
+    }
+  ],
+  assemblyChecklist: [
+    {
+      step: 1,
+      title: "Шаг 1: Размещение силового экзоскелета и модулей на верстак",
+      requiredParts: [
+        "humanoid-torso-main",
+        "humanoid-batt",
+        "humanoid-head-main",
+        "humanoid-arm-l",
+        "humanoid-arm-r",
+        "humanoid-leg-l",
+        "humanoid-leg-r"
+      ],
+      description: "Монтаж на верстак всех 7 ключевых узлов: несущего титанового торса, силовой батареи 24V 5000mAh, сенсорной головы с бинокулярным зрением, левой и правой рук (3-DoF) и нижних опорных конечностей.",
+      wiringInstructions: [],
+    },
+    {
+      step: 2,
+      title: "Шаг 2: Силовая шина питания 24V (Аккумулятор ➜ Распределитель торса)",
+      requiredParts: ["humanoid-batt", "humanoid-torso-main"],
+      description: "Подключение высокоамперной силовой батареи 24V к плате распределения питания торса для снабжения тяговых сервоприводов токами до 50А.",
+      wiringInstructions: [
+        {
+          fromPartId: "humanoid-batt",
+          fromPinId: "pos",
+          fromLabel: "Батарея 24V [POS +]",
+          wireColor: "red",
+          colorNameRu: "Красный",
+          wireColorName: "Красный",
+          toPartId: "humanoid-torso-main",
+          toPinId: "vin",
+          toLabel: "Торс [VIN +24V]",
+          wireType: "Силовой провод 10AWG (+24V)",
+          instructionText: "Подключите плюсовой вывод батареи к силовому входу VIN торса красным проводом сечением 4.0 мм².",
+        },
+        {
+          fromPartId: "humanoid-batt",
+          fromPinId: "neg",
+          fromLabel: "Батарея 24V [NEG -]",
+          wireColor: "black",
+          colorNameRu: "Черный",
+          wireColorName: "Черный",
+          toPartId: "humanoid-torso-main",
+          toPinId: "gnd",
+          toLabel: "Торс [GND Масса]",
+          wireType: "Силовой провод 10AWG (GND)",
+          instructionText: "Подключите минусовой вывод аккумулятора к заземлению GND торса черным проводом.",
+        },
+      ],
+    },
+    {
+      step: 3,
+      title: "Шаг 3: Высокоскоростная шина CAN-FD приводов рук (Торс ➜ Манипуляторы)",
+      requiredParts: ["humanoid-torso-main", "humanoid-arm-l", "humanoid-arm-r"],
+      description: "Коммутация синхронной шины CAN-FD (5 Мбит/с) для управления положением 3-DoF суставов левой и правой рук.",
+      wiringInstructions: [
+        {
+          fromPartId: "humanoid-torso-main",
+          fromPinId: "can_l",
+          fromLabel: "Торс [CAN-FD Port L]",
+          wireColor: "cyan",
+          colorNameRu: "Бирюзовый",
+          wireColorName: "Бирюзовый",
+          toPartId: "humanoid-arm-l",
+          toPinId: "can_in",
+          toLabel: "Левая Рука [CAN In]",
+          wireType: "Дифференциальная шина CAN-FD (Left)",
+          instructionText: "Соедините порт контроллера CAN-L с шиной приводов левой руки бирюзовым витым проводом.",
+        },
+        {
+          fromPartId: "humanoid-torso-main",
+          fromPinId: "can_r",
+          fromLabel: "Торс [CAN-FD Port R]",
+          wireColor: "cyan",
+          colorNameRu: "Бирюзовый",
+          wireColorName: "Бирюзовый",
+          toPartId: "humanoid-arm-r",
+          toPinId: "can_in",
+          toLabel: "Правая Рука [CAN In]",
+          wireType: "Дифференциальная шина CAN-FD (Right)",
+          instructionText: "Соедините порт контроллера CAN-R с шиной приводов правой руки бирюзовым витым проводом.",
+        },
+      ],
+    },
+    {
+      step: 4,
+      title: "Шаг 4: Мультисенсорный комплекс головы (Стерео-камеры ➜ Бортовой ИИ)",
+      requiredParts: ["humanoid-head-main", "humanoid-torso-main"],
+      description: "Подключение бинокулярного стерео-модуля RGB-D и ToF лидара головы к бортовому процессору NPU по скоростному интерфейсу.",
+      wiringInstructions: [
+        {
+          fromPartId: "humanoid-head-main",
+          fromPinId: "cam_out",
+          fromLabel: "Голова [RGB-D Stream]",
+          wireColor: "yellow",
+          colorNameRu: "Желтый",
+          wireColorName: "Желтый",
+          toPartId: "humanoid-torso-main",
+          toPinId: "cam_in",
+          toLabel: "Торс [NPU Video In]",
+          wireType: "Шлейф стереозрения MIPI/USB 3.2",
+          instructionText: "Подключите кабель стерео-камер глубины к видеопроцессору торса желтым экранированным кабелем.",
+        },
+        {
+          fromPartId: "humanoid-torso-main",
+          fromPinId: "5v_out",
+          fromLabel: "Торс [5V Out]",
+          wireColor: "red",
+          colorNameRu: "Красный",
+          wireColorName: "Красный",
+          toPartId: "humanoid-head-main",
+          toPinId: "vin",
+          toLabel: "Голова [5V In]",
+          wireType: "Питание сенсоров 5V 3A",
+          instructionText: "Подайте стабилизированное питание 5В от торса к головному сенсорному блоку красным проводом.",
+        },
+      ],
+    },
+    {
+      step: 5,
+      title: "Шаг 5: Приводы ходовой части и тензодатчики стоп (ZMP Баланс)",
+      requiredParts: ["humanoid-torso-main", "humanoid-leg-l", "humanoid-leg-r"],
+      description: "Подключение квази-прямых приводов (QDD) тазобедренных, коленных суставов обеих ног и датчиков баланса стоп.",
+      wiringInstructions: [
+        {
+          fromPartId: "humanoid-torso-main",
+          fromPinId: "leg_l_pwr",
+          fromLabel: "Торс [Leg Power L]",
+          wireColor: "purple",
+          colorNameRu: "Фиолетовый",
+          wireColorName: "Фиолетовый",
+          toPartId: "humanoid-leg-l",
+          toPinId: "pwr_in",
+          toLabel: "Левая Нога [Power 24V]",
+          wireType: "Силовая шина приводов левой ноги",
+          instructionText: "Подключите силовой канал питания левой ноги фиолетовым кабелем к разъему левого бедра.",
+        },
+        {
+          fromPartId: "humanoid-torso-main",
+          fromPinId: "leg_r_pwr",
+          fromLabel: "Торс [Leg Power R]",
+          wireColor: "purple",
+          colorNameRu: "Фиолетовый",
+          wireColorName: "Фиолетовый",
+          toPartId: "humanoid-leg-r",
+          toPinId: "pwr_in",
+          toLabel: "Правая Нога [Power 24V]",
+          wireType: "Силовая шина приводов правой ноги",
+          instructionText: "Подключите силовой канал питания правой ноги фиолетовым кабелем к разъему правого бедра.",
+        },
+      ],
+    },
+    {
+      step: 6,
+      title: "Шаг 6: Финальная калибровка нулевых точек энкодеров и тест походки",
+      requiredParts: ["humanoid-torso-main"],
+      description: "Инициализация инерциального измерительного модуля IMU (9-DOF), калибровка абсолютных энкодеров всех 18 суставов и запуск алгоритма ZMP-баланса.",
+      wiringInstructions: [],
+    },
+  ]
+};
+
+// =========================================================================
+// 5. ROBOT DOG QUADRUPED ARCHITECTURE (CyberHound Q4)
+// =========================================================================
+export const ROBODOG_ARCHITECTURE: CompleteDeviceArchitecture = {
+  id: "device-robot-dog",
+  name: "Quadruped Robot Dog",
+  codeName: "CyberHound Q4",
+  category: "Robotics",
+  description: "Высокодинамичный четвероногий робот-разведчик с 12 бесколлекторными приводами суставов, лидаром кругового обзора, датчиками силы в лапах и тяговой батареей 24V.",
+  testScenario: {
+    name: "Рысь (Trot), галоп и прыжки через препятствия с контролем тангажа",
+    ambientTempC: 25,
+    stressProfile: "Trot & Impact Shock Landing",
+    targetDurationMinutes: 45,
+  },
+  subsystems: [
+    {
+      id: "dog-sub-chassis",
+      name: "BODY & MONOCOQUE",
+      category: "Mechanical",
+      description: "Монокок корпуса из авиационного сплава 7075 и карбонового композита.",
+      parts: [
+        {
+          id: "dog-chassis",
+          name: "Монокок Корпуса Робопса",
+          category: "Mechanical",
+          subsystem: "CHASSIS",
+          purpose: "Несущий каркас робопса, распределение силового питания и шины CAN.",
+          inputs: ["24V Батарея", "CAN-FD шина лап"],
+          outputs: ["Питание сервоприводов 12x", "Лидар данные"],
+          powerSpecs: { voltage: "24.0V", current: "до 60А" },
+          parameters: { "Материал": "Алюминий 7075-T6 + Carbon Fiber", "Масса": "4.2 кг" },
+          connections: ["Корпус → Лапы", "Корпус → Батарея"],
+          failureImpact: "Отказ робота.",
+          layerOrder: 1,
+          assembledPosition: [0, 0, 0],
+          explodedPosition: [0, 0, 0],
+          dimensions: [2.8, 1.4, 3.8],
+          meshType: "robodog_body",
+        }
+      ]
+    },
+    {
+      id: "dog-sub-power",
+      name: "POWER SYSTEM",
+      category: "Power",
+      description: "Тяговая LiFePO4 батарея 24V 8000mAh.",
+      parts: [
+        {
+          id: "dog-batt",
+          name: "LiFePO4 24V 8000mAh Тяговая Батарея",
+          category: "Power",
+          subsystem: "POWER",
+          purpose: "Силовое питание 12 высокомоментных приводов лап.",
+          inputs: ["Зарядное устройство"],
+          outputs: ["Силовая линия 24V XT90"],
+          powerSpecs: { voltage: "24.0V", current: "80А пиковый" },
+          parameters: { "Емкость": "8000 мА·ч", "Химия": "LiFePO4" },
+          connections: ["Батарея → Корпус"],
+          failureImpact: "Обесточивание робопса.",
+          layerOrder: 2,
+          assembledPosition: [0, 0.3, 0],
+          explodedPosition: [0, 2.2, 0],
+          dimensions: [1.8, 1.0, 2.2],
+          meshType: "battery_lipo",
+        }
+      ]
+    },
+    {
+      id: "dog-sub-legs",
+      name: "4x 3-DoF LEGS",
+      category: "Actuator",
+      description: "Четыре модульные лапы с квази-прямыми приводами коленей и бедер.",
+      parts: [
+        {
+          id: "dog-leg-fl",
+          name: "Передняя Левая Лапа (3-DoF)",
+          category: "Actuator",
+          subsystem: "LEGS",
+          purpose: "Опорно-двигательный узел передней левой лапы.",
+          inputs: ["24V", "CAN-FD"],
+          outputs: ["Датчик силы контакта"],
+          powerSpecs: { voltage: "24.0V", current: "15А" },
+          parameters: { "Редукция": "6:1", "Момент": "35 Н·м" },
+          connections: ["Лапа → Корпус"],
+          failureImpact: "Хромота.",
+          layerOrder: 3,
+          assembledPosition: [-1.6, -0.4, 1.6],
+          explodedPosition: [-3.2, -1.2, 2.8],
+          dimensions: [1.0, 2.6, 1.0],
+          meshType: "robodog_leg_fl",
+        },
+        {
+          id: "dog-leg-fr",
+          name: "Передняя Правая Лапа (3-DoF)",
+          category: "Actuator",
+          subsystem: "LEGS",
+          purpose: "Опорно-двигательный узел передней правой лапы.",
+          inputs: ["24V", "CAN-FD"],
+          outputs: ["Датчик силы контакта"],
+          powerSpecs: { voltage: "24.0V", current: "15А" },
+          parameters: { "Редукция": "6:1", "Момент": "35 Н·м" },
+          connections: ["Лапа → Корпус"],
+          failureImpact: "Хромота.",
+          layerOrder: 3,
+          assembledPosition: [1.6, -0.4, 1.6],
+          explodedPosition: [3.2, -1.2, 2.8],
+          dimensions: [1.0, 2.6, 1.0],
+          meshType: "robodog_leg_fr",
+        },
+        {
+          id: "dog-leg-rl",
+          name: "Задняя Левая Лапа (3-DoF)",
+          category: "Actuator",
+          subsystem: "LEGS",
+          purpose: "Опорно-двигательный узел задней левой лапы.",
+          inputs: ["24V", "CAN-FD"],
+          outputs: ["Датчик силы контакта"],
+          powerSpecs: { voltage: "24.0V", current: "15А" },
+          parameters: { "Редукция": "6:1", "Момент": "35 Н·м" },
+          connections: ["Лапа → Корпус"],
+          failureImpact: "Хромота.",
+          layerOrder: 3,
+          assembledPosition: [-1.6, -0.4, -1.6],
+          explodedPosition: [-3.2, -1.2, -2.8],
+          dimensions: [1.0, 2.6, 1.0],
+          meshType: "robodog_leg_rl",
+        },
+        {
+          id: "dog-leg-rr",
+          name: "Задняя Правая Лапа (3-DoF)",
+          category: "Actuator",
+          subsystem: "LEGS",
+          purpose: "Опорно-двигательный узел задней правой лапы.",
+          inputs: ["24V", "CAN-FD"],
+          outputs: ["Датчик силы контакта"],
+          powerSpecs: { voltage: "24.0V", current: "15А" },
+          parameters: { "Редукция": "6:1", "Момент": "35 Н·м" },
+          connections: ["Лапа → Корпус"],
+          failureImpact: "Хромота.",
+          layerOrder: 3,
+          assembledPosition: [1.6, -0.4, -1.6],
+          explodedPosition: [3.2, -1.2, -2.8],
+          dimensions: [1.0, 2.6, 1.0],
+          meshType: "robodog_leg_rr",
+        }
+      ]
+    }
+  ],
+  assemblyChecklist: [
+    {
+      step: 1,
+      title: "Шаг 1: Размещение корпуса и конечностей робопса на верстак",
+      requiredParts: ["dog-chassis", "dog-batt", "dog-leg-fl", "dog-leg-fr", "dog-leg-rl", "dog-leg-rr"],
+      description: "Установка несущего монокока корпуса, силовой батареи 24V и 4 модульных лап с приводами QDD.",
+      wiringInstructions: [],
+    },
+    {
+      step: 2,
+      title: "Шаг 2: Силовая шина батареи 24V (Аккумулятор ➜ Корпус)",
+      requiredParts: ["dog-batt", "dog-chassis"],
+      description: "Подключение силовой батареи к вводу питания распределительной платы корпуса робопса.",
+      wiringInstructions: [
+        {
+          fromPartId: "dog-batt",
+          fromPinId: "pos",
+          fromLabel: "Батарея 24V [POS +]",
+          wireColor: "red",
+          colorNameRu: "Красный",
+          wireColorName: "Красный",
+          toPartId: "dog-chassis",
+          toPinId: "vin",
+          toLabel: "Корпус [VIN +24V]",
+          wireType: "Силовой провод питания",
+          instructionText: "Подключите плюсовой вывод батареи к силовому входу корпуса красным проводом.",
+        },
+        {
+          fromPartId: "dog-batt",
+          fromPinId: "neg",
+          fromLabel: "Батарея 24V [NEG -]",
+          wireColor: "black",
+          colorNameRu: "Черный",
+          wireColorName: "Черный",
+          toPartId: "dog-chassis",
+          toPinId: "gnd",
+          toLabel: "Корпус [GND]",
+          wireType: "Общая масса GND",
+          instructionText: "Подключите минусовой вывод батареи к заземлению корпуса черным проводом.",
+        },
+      ],
+    },
+    {
+      step: 3,
+      title: "Шаг 3: Коммутация передних лап (Шина питания и CAN)",
+      requiredParts: ["dog-chassis", "dog-leg-fl", "dog-leg-fr"],
+      description: "Подключение шин управления и силового питания передней пары лап робопса.",
+      wiringInstructions: [],
+    },
+    {
+      step: 4,
+      title: "Шаг 4: Коммутация задних лап (Шина питания и CAN)",
+      requiredParts: ["dog-chassis", "dog-leg-rl", "dog-leg-rr"],
+      description: "Подключение шин управления и силового питания задней пары конечностей робопса.",
+      wiringInstructions: [],
+    },
+    {
+      step: 5,
+      title: "Шаг 5: Инициализация лидара 360° и IMU стабилизации",
+      requiredParts: ["dog-chassis"],
+      description: "Тестирование сканирования рельефа и 9-осевой инерциальной навигации.",
+      wiringInstructions: [],
+    },
+    {
+      step: 6,
+      title: "Шаг 6: Финальная калибровка энкодеров суставов и запуск походки",
+      requiredParts: ["dog-chassis"],
+      description: "Автоматическая калибровка нулевых точек 12 приводов и запуск походки Trot.",
+      wiringInstructions: [],
+    },
+  ]
+};
+
+// =========================================================================
+// 6. LAPTOP / ULTRABOOK ARCHITECTURE (Ноутбук)
+// =========================================================================
+export const LAPTOP_ARCHITECTURE: CompleteDeviceArchitecture = {
+  id: "device-laptop",
+  name: "Modular Ultrabook Architecture",
+  codeName: "ForgeBook Pro 16",
+  category: "Computing",
+  description: "Архитектура производительного ультрабука: алюминиевое Unibody шасси, 8-слойная системная плата с SoC BGA, система охлаждения с двойной медной тепловой трубкой и PWM кулером, аккумулятор 4S 15.2V 65Wh с контроллером USB-PD 100W, QHD 165Hz матрица eDP и топкейс.",
+  weightGrams: 1450,
+  nominalVoltageV: 15.2,
+  maxPowerW: 100,
+  subsystems: [
+    {
+      id: "laptop-sub-enclosure",
+      name: "CHASSIS & TOPCASE (Корпус и Топкейс)",
+      category: "Mechanical",
+      description: "Несущий корпус из анодированного авиационного алюминия 6061 с ребрами жесткости.",
+      parts: [
+        {
+          id: "laptop-part-chassis",
+          name: "Алюминиевый нижний поддон корпуса (D-Cover)",
+          category: "Mechanical",
+          subsystem: "CHASSIS",
+          purpose: "Нижняя базовая крышка корпуса ноутбука с вентиляционными прорезями и антискользящими ножками.",
+          inputs: ["Механическая фиксация"],
+          outputs: ["Защита компонентов и воздухозабор"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: { "Материал": "Алюминий 6061-T6", "Толщина": "1.0 мм", "Масса": "220 г" },
+          connections: ["Поддон закрывает Батарею, Плату, Кулер"],
+          failureImpact: "Деформация корпуса может передавить плоский Li-Ion аккумулятор.",
+          layerOrder: 0,
+          assembledPosition: [0, -0.4, 0],
+          explodedPosition: [0, -2.5, 0],
+          dimensions: [8.5, 0.4, 6.0],
+          meshType: "laptop_chassis",
+        },
+        {
+          id: "laptop-part-topcase",
+          name: "Топкейс с клавиатурой и Precision Touchpad (C-Cover)",
+          category: "Mechanical",
+          subsystem: "CHASSIS",
+          purpose: "Верхняя рабочая панель с ножничной клавиатурой, подсветкой и стеклянным тачпадом.",
+          inputs: ["Нажатия клавиш", "Жесты мультитач"],
+          outputs: ["Шина I2C/USB ввода на материнскую плату"],
+          powerSpecs: { voltage: "3.3V", current: "0.15 A" },
+          parameters: { "Ход клавиш": "1.4 мм", "Подсветка": "Белая LED 3 уровня", "Тачпад": "Стекло AG" },
+          connections: ["Топкейс подключается шлейфом FPC к материнской плате"],
+          failureImpact: "Обрыв шлейфа блокирует ввод с клавиатуры и тачпада.",
+          layerOrder: 4,
+          assembledPosition: [0, 0.4, 0],
+          explodedPosition: [0, 2.8, 0],
+          dimensions: [8.5, 0.3, 6.0],
+          meshType: "laptop_topcase",
+        },
+      ],
+    },
+    {
+      id: "laptop-sub-power",
+      name: "POWER DELIVERY (Питание и Батарея)",
+      category: "Power",
+      description: "Высокоемкий 4-ячеечный аккумулятор и контроллер быстрой зарядки USB-PD 100W.",
+      parts: [
+        {
+          id: "laptop-part-battery",
+          name: "4S Li-Ion Батарея 15.2V 4500mAh (65Wh)",
+          category: "Power",
+          subsystem: "POWER",
+          purpose: "Химический источник постоянного тока высокой емкости для автономной работы до 12 часов.",
+          inputs: ["Шина заряда 20V Type-C PD"],
+          outputs: ["Силовая шина VBAT 15.2V (до 10A пик)"],
+          powerSpecs: { voltage: "15.2V (17.4V макс)", current: "до 8A" },
+          parameters: { "Емкость": "65 Вт·ч", "Ячеек": "4S1P Li-Polymer", "Масса": "280 г" },
+          connections: ["Battery → Motherboard Main Power Rail"],
+          failureImpact: "При отказе батареи ноутбук работает только от сетевого адаптера.",
+          layerOrder: 1,
+          assembledPosition: [0, 0.0, 1.8],
+          explodedPosition: [0, -0.8, 1.8],
+          dimensions: [7.5, 0.3, 2.2],
+          meshType: "laptop_battery",
+        },
+        {
+          id: "laptop-part-pmic",
+          name: "Контроллер Type-C USB-PD 100W & Buck-Boost",
+          category: "Power",
+          subsystem: "POWER",
+          purpose: "Преобразует 20V входного напряжения Type-C в системные напряжения 15.2V, 5V, 3.3V и 1.8V.",
+          inputs: ["20V Type-C зарядка"],
+          outputs: ["Системные стабилизированные шины питания"],
+          powerSpecs: { voltage: "Вход 5-20V, Выход 0.8-15.2V", current: "до 5A" },
+          parameters: { "КПД": "96%", "Чип": "TI BQ25713", "Протокол": "USB-PD 3.0 PPS" },
+          connections: ["PMIC → Battery Charge, Motherboard VRM"],
+          failureImpact: "Ноутбук не реагирует на зарядное устройство и не включается.",
+          layerOrder: 2,
+          assembledPosition: [-3.2, 0.2, -1.5],
+          explodedPosition: [-3.2, 1.0, -1.5],
+          dimensions: [1.2, 0.2, 1.2],
+          meshType: "laptop_pmic",
+        },
+      ],
+    },
+    {
+      id: "laptop-sub-motherboard",
+      name: "MOTHERBOARD & COMPUTE (Материнская плата и SoC)",
+      category: "Control",
+      description: "Высокоплотная многослойная системная плата с BGA монтажом процессора и быстрой памятью.",
+      parts: [
+        {
+          id: "laptop-part-motherboard",
+          name: "Системная материнская плата ноутбука (8 слоев HDI)",
+          category: "Control",
+          subsystem: "COMPUTE",
+          purpose: "Центральная объединяющая печатная плата. Несет процессор, VRM, чипсет, порты и звуковой кодек.",
+          inputs: ["Питание 15.2V / 20V"],
+          outputs: ["Высокоскоростные шины PCIe 4.0, eDP, USB 4.0"],
+          powerSpecs: { voltage: "15.2V", current: "до 6A" },
+          parameters: { "Слоев": "8 слоев Class 4", "Плата": "TG-170 FR4 + Gold", "Габариты": "240x110 мм" },
+          connections: ["Материнская плата соединяет все узлы ноутбука"],
+          failureImpact: "Полный отказ ноутбука при КЗ в любой фазе питания VRM.",
+          layerOrder: 2,
+          assembledPosition: [0, 0.1, -1.2],
+          explodedPosition: [0, 0.9, -1.2],
+          dimensions: [7.0, 0.2, 3.2],
+          meshType: "laptop_motherboard",
+        },
+        {
+          id: "laptop-part-soc",
+          name: "Гибридный процессор SoC (8C/16T CPU + RDNA3 GPU)",
+          category: "Control",
+          subsystem: "COMPUTE",
+          purpose: "Центральный мозг ноутбука: вычисления, графика, аппаратное ускорение ИИ и нейросетей.",
+          inputs: ["VCore 0.9V - 1.35V", "Шина памяти 6400 MT/s"],
+          outputs: ["Видеопоток eDP 165Hz", "Шина PCIe 4.0 16 линий"],
+          powerSpecs: { voltage: "1.1V Vcore", current: "до 45A пик", operatingTemp: "до 95°C" },
+          parameters: { "TDP": "45 Вт (65 Вт boost)", "Кэш": "24 МБ L3", "Техпроцесс": "4 нм FinFET" },
+          connections: ["SoC распаян на материнской плате в сокете FP7 BGA"],
+          failureImpact: "Перегрев выше 105°C вызывает аварийный троттлинг или отключение.",
+          layerOrder: 2,
+          assembledPosition: [0.5, 0.25, -1.2],
+          explodedPosition: [0.5, 1.4, -1.2],
+          dimensions: [1.6, 0.15, 1.6],
+          meshType: "laptop_cpu",
+        },
+        {
+          id: "laptop-part-ssd",
+          name: "Накопитель M.2 NVMe PCIe 4.0 SSD 1TB",
+          category: "Control",
+          subsystem: "COMPUTE",
+          purpose: "Хранилище операционной системы и данных со скоростью чтения до 7000 МБ/с.",
+          inputs: ["3.3V питание", "PCIe 4.0 x4 шина"],
+          outputs: ["Поток данных 7 ГБ/с"],
+          powerSpecs: { voltage: "3.3V", current: "до 2.5A" },
+          parameters: { "Емкость": "1000 ГБ", "Память": "3D TLC NAND 176L", "Форм-фактор": "M.2 2280" },
+          connections: ["SSD вставляется в разъем M.2 Key-M"],
+          failureImpact: "Ошибка 'No bootable device found' при повреждении контроллера.",
+          layerOrder: 2,
+          assembledPosition: [-2.2, 0.25, -0.5],
+          explodedPosition: [-2.2, 1.2, -0.5],
+          dimensions: [2.2, 0.1, 0.8],
+          meshType: "laptop_ssd",
+        },
+      ],
+    },
+    {
+      id: "laptop-sub-cooling",
+      name: "THERMAL SOLUTION (Система охлаждения)",
+      category: "Actuator",
+      description: "Вакуумные медные тепловые трубки и турбинный кулер центробежного типа.",
+      parts: [
+        {
+          id: "laptop-part-heatsink",
+          name: "Медный радиатор с двойными теплотрубками",
+          category: "Mechanical",
+          subsystem: "COOLING",
+          purpose: "Забирает тепло от кристалла SoC и транспортирует его к медным ребрам радиатора на выдув.",
+          inputs: ["Тепловой поток от CPU до 65W"],
+          outputs: ["Рассеивание тепла через воздушный поток кулера"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: { "Трубки": "Медь D6мм спеченный фитиль", "Ребра": "0.15 мм медь 68 шт." },
+          connections: ["Теплосъемник прижимается винтами к SoC через термопасту"],
+          failureImpact: "Высыхание термопасты приводит к мгновенному перегреву процессора.",
+          layerOrder: 2,
+          assembledPosition: [1.5, 0.35, -1.5],
+          explodedPosition: [1.5, 1.8, -1.5],
+          dimensions: [3.8, 0.25, 1.5],
+          meshType: "laptop_heatsink",
+        },
+        {
+          id: "laptop-part-cooler",
+          name: "Турбинный центробежный кулер с PWM управлением",
+          category: "Actuator",
+          subsystem: "COOLING",
+          purpose: "Продувает холодный воздух через радиатор, управляя оборотами от 1200 до 5500 RPM по ШИМ.",
+          inputs: ["5V питание", "PWM сигнал управления оборотами от EC"],
+          outputs: ["Воздушный поток до 6.5 CFM"],
+          powerSpecs: { voltage: "5.0V", current: "0.45 A" },
+          parameters: { "Обороты": "1200-5500 RPM", "Уровень шума": "до 38 дБА", "Подшипник": "FDB гидродинамический" },
+          connections: ["Кулер подключается 4-pin коннектором к плате"],
+          failureImpact: "Остановка кулера вызывает перегрев и выключение ноутбука через 30 секунд.",
+          layerOrder: 2,
+          assembledPosition: [3.2, 0.35, -1.5],
+          explodedPosition: [3.2, 1.8, -1.5],
+          dimensions: [1.8, 0.3, 1.8],
+          meshType: "laptop_fan",
+        },
+      ],
+    },
+    {
+      id: "laptop-sub-display",
+      name: "DISPLAY MODULE (Экранная матрица eDP)",
+      category: "Display",
+      description: "16-дюймовая матрица IPS со сверхбыстрым временем отклика и широким цветовым охватом 100% DCI-P3.",
+      parts: [
+        {
+          id: "laptop-part-screen",
+          name: "16-дюймовый IPS экран QHD 165Hz (A/B-Cover модуль)",
+          category: "Display",
+          subsystem: "DISPLAY",
+          purpose: "Выводит изображение высокого разрешения с частотой обновления 165 Гц.",
+          inputs: ["Шлейф eDP 40-pin 4 линии", "Питание подсветки 19V"],
+          outputs: ["Изображение 2560x1600 500 нит HDR"],
+          powerSpecs: { voltage: "3.3V логика / 19V подсветка", current: "до 0.8A" },
+          parameters: { "Диагональ": "16.0 дюймов", "Разрешение": "2560x1600 (16:10)", "Частота": "165 Гц", "Яркость": "500 нит" },
+          connections: ["Экран соединяется 40-пиновым коаксиальным шлейфом через петли"],
+          failureImpact: "Черный экран или мерцание полос при повреждении шлейфа в петле.",
+          layerOrder: 4,
+          assembledPosition: [0, 2.2, -2.6],
+          explodedPosition: [0, 4.2, -3.2],
+          dimensions: [8.5, 5.5, 0.3],
+          meshType: "laptop_screen",
+        },
+      ],
+    },
+  ],
+  assemblyChecklist: [
+    {
+      step: 1,
+      title: "Шаг 1: Установка шасси и аккумулятора 15.2V 65Wh",
+      requiredParts: ["laptop-part-chassis", "laptop-part-battery"],
+      description: "Установи нижнюю алюминиевую раму D-Cover и зафиксируй литий-ионный батарейный блок в нижней части отсека.",
+      wiringInstructions: [],
+    },
+    {
+      step: 2,
+      title: "Шаг 2: Монтаж материнской платы и контроллера Type-C PD",
+      requiredParts: ["laptop-part-motherboard", "laptop-part-pmic", "laptop-part-ssd"],
+      description: "Установи материнскую плату, закрепи винтами заземления и установи накопитель M.2 NVMe SSD.",
+      wiringInstructions: [
+        {
+          id: "lap-w-bat-mb-pos",
+          wireColor: "red",
+          colorNameRu: "Красный",
+          fromPartId: "laptop-part-battery",
+          fromPinId: "pos",
+          fromLabel: "Battery VBAT (+)",
+          toPartId: "laptop-part-motherboard",
+          toPinId: "vbat",
+          toLabel: "Motherboard Power In",
+          wireType: "Power Cable",
+          instructionText: "Подключи силовой разъем питания батареи к материнской плате.",
+        },
+        {
+          id: "lap-w-bat-mb-neg",
+          wireColor: "black",
+          colorNameRu: "Черный",
+          fromPartId: "laptop-part-battery",
+          fromPinId: "neg",
+          fromLabel: "Battery GND (-)",
+          toPartId: "laptop-part-motherboard",
+          toPinId: "gnd",
+          toLabel: "Motherboard GND",
+          wireType: "Ground Cable",
+          instructionText: "Замкни общую минусовую шину GND батареи.",
+        },
+      ],
+    },
+    {
+      step: 3,
+      title: "Шаг 3: Монтаж системы охлаждения (Теплотрубки + Кулер PWM)",
+      requiredParts: ["laptop-part-heatsink", "laptop-part-cooler"],
+      description: "Нанеси термопасту на кристалл SoC, прижми медный радиатор винтами с пружинами и подключи кулер к плате.",
+      wiringInstructions: [
+        {
+          id: "lap-w-fan-pwm",
+          wireColor: "yellow",
+          colorNameRu: "Желтый",
+          fromPartId: "laptop-part-motherboard",
+          fromPinId: "fan_pwm",
+          fromLabel: "EC Fan PWM Out",
+          toPartId: "laptop-part-cooler",
+          toPinId: "pwm_in",
+          toLabel: "Fan Motor PWM In",
+          wireType: "PWM Signal",
+          instructionText: "Подключи 4-pin разъем управления вентилятором кулера.",
+        },
+      ],
+    },
+    {
+      step: 4,
+      title: "Шаг 4: Подключение дисплейного модуля eDP 165Hz",
+      requiredParts: ["laptop-part-screen"],
+      description: "Протяни коаксиальный шлейф eDP через шарнир петли экрана и зафиксируй металлический фиксатор разъема.",
+      wiringInstructions: [
+        {
+          id: "lap-w-edp-video",
+          wireColor: "cyan",
+          colorNameRu: "Бирюзовый",
+          fromPartId: "laptop-part-motherboard",
+          fromPinId: "edp_out",
+          fromLabel: "SoC eDP Lanes",
+          toPartId: "laptop-part-screen",
+          toPinId: "edp_in",
+          toLabel: "Panel eDP 40-Pin",
+          wireType: "eDP Cable",
+          instructionText: "Соедини видео-шлейф дисплея с материнской платой.",
+        },
+      ],
+    },
+    {
+      step: 5,
+      title: "Шаг 5: Установка топкейса и первый старт системы",
+      requiredParts: ["laptop-part-topcase"],
+      description: "Подключи шлейфы клавиатуры и тачпада, защелкни периметр топкейса и запусти ноутбук кнопкой питания!",
+      wiringInstructions: [],
+    },
+  ],
+};
+
+// =========================================================================
+// 7. SMART 4K TELEVISION ARCHITECTURE (Телевизор)
+// =========================================================================
+export const TELEVISION_ARCHITECTURE: CompleteDeviceArchitecture = {
+  id: "device-television",
+  name: "Smart 4K UHD Television Architecture",
+  codeName: "ForgeVision 55 HDR",
+  category: "Consumer",
+  description: "Архитектура современного 55-дюймового Smart TV: изолированный импульсный блок питания SMPS 230V AC с защитой от перенапряжений, материнская плата декодирования 4K видеопотока, Direct-LED подсветка матрицы, тайминг-контроллер T-Con, 4K ЖК-панель и стереоакустика.",
+  weightGrams: 11200,
+  nominalVoltageV: 230,
+  maxPowerW: 145,
+  subsystems: [
+    {
+      id: "tv-sub-chassis",
+      name: "CHASSIS & BACKPANEL (Несущее шасси)",
+      category: "Mechanical",
+      description: "Оцинкованный стальной поддон и защитный задний кожух.",
+      parts: [
+        {
+          id: "tv-part-backcase",
+          name: "Задний металлический кожух шасси с экранированием",
+          category: "Mechanical",
+          subsystem: "CHASSIS",
+          purpose: "Несущая база телевизора. Удерживает блок питания, материнскую плату, рассеивает тепло и защищает от ЭМП.",
+          inputs: ["Механическая фиксация плат"],
+          outputs: ["Экранирование и рассеивание тепла"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: { "Материал": "Оцинкованная сталь SECC 0.8мм", "Масса": "3.8 кг" },
+          connections: ["Шасси держит SMPS, Mainboard, Подсветку"],
+          failureImpact: "Без экранирования радиопомехи вызывают артефакты на экране.",
+          layerOrder: 0,
+          assembledPosition: [0, 0.15, 0],
+          explodedPosition: [0, 0.15, 0],
+          dimensions: [10.5, 0.3, 6.2],
+          meshType: "tv_chassis",
+        },
+        {
+          id: "tv-part-bezel",
+          name: "Тонкая фронтальная рамка матрицы (Bezel-less)",
+          category: "Mechanical",
+          subsystem: "CHASSIS",
+          purpose: "Фронтальная декоративная рамка, защищающая края хрупкой стеклянной ЖК-матрицы.",
+          inputs: ["Защита периметра стекла"],
+          outputs: ["Эстетический вид без рамок"],
+          powerSpecs: { voltage: "N/A", current: "0 A" },
+          parameters: { "Материал": "Алюминиевый профиль 4мм", "Масса": "0.6 кг" },
+          connections: ["Рамка зажимает ЖК-панель спереди"],
+          failureImpact: "Давление на углы матрицы вызывает утечку жидких кристаллов.",
+          layerOrder: 4,
+          assembledPosition: [0, 1.08, 0],
+          explodedPosition: [0, 4.7, 0],
+          dimensions: [10.8, 0.25, 6.5],
+          meshType: "tv_bezel",
+        },
+      ],
+    },
+    {
+      id: "tv-sub-power",
+      name: "POWER SUPPLY SMPS (Импульсный блок питания)",
+      category: "Power",
+      description: "Высоковольтный преобразователь 230V AC в изолированные 12V DC, 24V DC и высоковольтный LED драйвер.",
+      parts: [
+        {
+          id: "tv-part-smps",
+          name: "Импульсный блок питания SMPS 230V AC -> 12V/24V + LED Driver",
+          category: "Power",
+          subsystem: "POWER",
+          purpose: "Преобразует опасное переменное напряжение 230В в безопасные 12В для системной платы и до 95В для подсветки.",
+          inputs: ["230V AC Mains (сеть)"],
+          outputs: ["12V DC логика", "24V DC аудио", "95V DC цепочки подсветки"],
+          powerSpecs: { voltage: "Вход 100-240V AC, Выход 12V/24V/95V", current: "до 5A суммарно" },
+          parameters: { "Мощность": "160 Вт", "Конденсаторы": "450V 120uF Rubycon", "Трансформатор": "Ферритовый EER35" },
+          connections: ["SMPS → Mainboard 12V, LED Backlight Arrays"],
+          failureImpact: "Вздутие конденсаторов или пробой ШИМ-контроллера оставляет телевизор без признаков жизни.",
+          layerOrder: 1,
+          assembledPosition: [-3.1, 0.45, -0.3],
+          explodedPosition: [-3.3, 1.3, -0.3],
+          dimensions: [3.2, 0.6, 3.8],
+          meshType: "tv_smps",
+        },
+        {
+          id: "tv-part-ac-inlet",
+          name: "Сетевой фильтр с плавким предохранителем T2A",
+          category: "Power",
+          subsystem: "POWER",
+          purpose: "Защищает схему от бросков напряжения в сети и предотвращает возгорание при коротком замыкании.",
+          inputs: ["Шнур питания 230V 50Hz"],
+          outputs: ["Фильтрованное напряжение на вход диодного моста"],
+          powerSpecs: { voltage: "250V AC", current: "2.0 A max" },
+          parameters: { "Предохранитель": "Керамический T2A 250V", "Варистор": "14D471K" },
+          connections: ["AC Inlet → SMPS Primary Stage"],
+          failureImpact: "Перегорание предохранителя спасает остальные платы от пожара.",
+          layerOrder: 1,
+          assembledPosition: [-4.4, 0.45, 2.2],
+          explodedPosition: [-4.8, 1.3, 2.4],
+          dimensions: [1.4, 0.5, 1.2],
+          meshType: "tv_ac_inlet",
+        },
+      ],
+    },
+    {
+      id: "tv-sub-mainboard",
+      name: "SMART TV MAINBOARD (Системная плата и Видеопроцессор)",
+      category: "Control",
+      description: "Вычислительный центр телевизора с 4K HDR видеодекодером, Smart OS, HDMI 2.1 и тюнером.",
+      parts: [
+        {
+          id: "tv-part-mainboard",
+          name: "Системная плата Smart TV (SoC 4K HDR + HDMI 2.1 + Wi-Fi)",
+          category: "Control",
+          subsystem: "MAINBOARD",
+          purpose: "Принимает видеосигнал с HDMI, тюнера или сети, производит апскейлинг до 4K и формирует поток LVDS.",
+          inputs: ["12V DC питание", "HDMI 2.1", "Wi-Fi 6"],
+          outputs: ["Шина V-by-One / LVDS на T-Con плату", "I2S аудио на усилитель"],
+          powerSpecs: { voltage: "12.0V DC", current: "до 2.5A" },
+          parameters: { "SoC": "Quad Cortex-A73 1.8GHz", "ОЗУ": "3GB DDR4", "ПЗУ": "32GB eMMC" },
+          connections: ["Mainboard → T-Con (LVDS), Speakers, SMPS (PWR_ON)"],
+          failureImpact: "Зависание на логотипе или циклический ребут при повреждении прошивки eMMC.",
+          layerOrder: 1,
+          assembledPosition: [3.1, 0.45, -0.3],
+          explodedPosition: [3.3, 1.3, -0.3],
+          dimensions: [3.2, 0.5, 3.8],
+          meshType: "tv_mainboard",
+        },
+        {
+          id: "tv-part-tcon",
+          name: "Плата тайминг-контроллера матрицы (T-Con Board)",
+          category: "Control",
+          subsystem: "MAINBOARD",
+          purpose: "Преобразует поток V-by-One в высокоскоростные управляющие сигналы драйверов строк и столбцов матрицы.",
+          inputs: ["LVDS / V-by-One видеопоток", "12V питание"],
+          outputs: ["Шлейфы COF (Chip on Film) на стеклянную панель"],
+          powerSpecs: { voltage: "12V вход / VGH 28V, VGL -7V, VCOM 7V", current: "1.2A" },
+          parameters: { "Частота": "120 Гц", "Разрядность": "10-bit (1.07 млрд цветов)" },
+          connections: ["T-Con соединяется шлейфами со стеклом панели"],
+          failureImpact: "Белый экран, искажения цветов или полосы при сбое DC-DC преобразователя VGH.",
+          layerOrder: 1,
+          assembledPosition: [0, 0.45, 1.8],
+          explodedPosition: [0, 1.4, 2.1],
+          dimensions: [2.8, 0.35, 1.0],
+          meshType: "tv_tcon",
+        },
+      ],
+    },
+    {
+      id: "tv-sub-backlight",
+      name: "DIRECT-LED BACKLIGHT (Подсветка матрицы)",
+      category: "Display",
+      description: "Равномерная светодиодная подсветка с рассеивающими линзами и квантовыми точками.",
+      parts: [
+        {
+          id: "tv-part-backlight",
+          name: "Светодиодная матрица подсветки Direct LED (12 линеек)",
+          category: "Display",
+          subsystem: "BACKLIGHT",
+          purpose: "Создает мощный равномерный белый свет 500 нит, просвечивающий ЖК-матрицу сзади.",
+          inputs: ["Высоковольтная шина 95V DC от драйвера SMPS"],
+          outputs: ["Равномерный световой поток с цветовой температурой 6500K"],
+          powerSpecs: { voltage: "95V DC", current: "650 мА" },
+          parameters: { "Светодиодов": "72 шт. CSP LED", "Линзы": "Оптические светорассеивающие PMMA" },
+          connections: ["Линейки соединены последовательно-параллельно со схемой SMPS"],
+          failureImpact: "Сгорание даже одного светодиода гасит всю подсветку (звук есть, картинки нет).",
+          layerOrder: 2,
+          assembledPosition: [0, 0.65, 0],
+          explodedPosition: [0, 2.4, 0],
+          dimensions: [9.4, 0.25, 5.2],
+          meshType: "tv_backlight",
+        },
+      ],
+    },
+    {
+      id: "tv-sub-panel",
+      name: "4K LCD GLASS PANEL (Жидкие кристаллы)",
+      category: "Display",
+      description: "55-дюймовая поляризованная стеклянная пластина с субпикселями RGB.",
+      parts: [
+        {
+          id: "tv-part-panel",
+          name: "55-дюймовая 4K IPS жидкокристаллическая панель",
+          category: "Display",
+          subsystem: "PANEL",
+          purpose: "Формирует цветное изображение, поворачивая жидкие кристаллы и пропуская свет подсветки.",
+          inputs: ["Сигналы строк и столбцов со шлейфов T-Con"],
+          outputs: ["Цветное изображение 3840x2160 пикселей"],
+          powerSpecs: { voltage: "3.3V логика / VCOM 6.8V", current: "0.5A" },
+          parameters: { "Разрешение": "3840x2160 UHD", "Контраст": "1200:1", "Углы обзора": "178°/178°" },
+          connections: ["Панель подключена шлейфами COF к T-Con плате"],
+          failureImpact: "Физическая трещина в стекле неустранима и требует замены всей панели.",
+          layerOrder: 3,
+          assembledPosition: [0, 0.9, 0],
+          explodedPosition: [0, 3.6, 0],
+          dimensions: [10.0, 0.2, 5.8],
+          meshType: "tv_panel",
+        },
+      ],
+    },
+    {
+      id: "tv-sub-audio",
+      name: "AUDIO & SPEAKERS (Звуковой тракт)",
+      category: "Actuator",
+      description: "Стереодинамики с фазоинверторами и усилитель класса D.",
+      parts: [
+        {
+          id: "tv-part-speakers",
+          name: "Стереодинамики 2x15W с акустическими камерами баса",
+          category: "Actuator",
+          subsystem: "AUDIO",
+          purpose: "Воспроизводят звуковое сопровождение телепередач и фильмов с объемным эффектом.",
+          inputs: ["Усиленный звуковой сигнал с платы Mainboard"],
+          outputs: ["Звуковое давление до 88 дБ"],
+          powerSpecs: { voltage: "до 12V RMS", current: "1.2A" },
+          parameters: { "Мощность": "2x 15 Вт", "Импеданс": "6 Ом", "Диапазон": "80 Гц - 18000 Гц" },
+          connections: ["Динамики подключаются кабелем 4-pin к разъему SPK на материнской плате"],
+          failureImpact: "Хрипы при повреждении диффузора или тишина при обрыве провода.",
+          layerOrder: 1,
+          assembledPosition: [0, 0.45, 2.65],
+          explodedPosition: [0, 1.3, 3.0],
+          dimensions: [6.4, 0.55, 0.7],
+          meshType: "tv_speaker",
+        },
+      ],
+    },
+  ],
+  assemblyChecklist: [
+    {
+      step: 1,
+      title: "Шаг 1: Монтаж светодиодной подсветки Backlight на шасси",
+      requiredParts: ["tv-part-backcase", "tv-part-backlight"],
+      description: "Уложи светодиодные стринги подсветки на металлическое шасси и зафиксируй термопроводящим скотчем.",
+      wiringInstructions: [],
+    },
+    {
+      step: 2,
+      title: "Шаг 2: Установка импульсного блока питания SMPS и фильтра",
+      requiredParts: ["tv-part-smps", "tv-part-ac-inlet"],
+      description: "Установи плату SMPS на изолирующие стойки шасси и подключи фазу и заземление от сетевого фильтра 230V.",
+      wiringInstructions: [
+        {
+          id: "tv-w-ac-smps",
+          wireColor: "blue",
+          colorNameRu: "Синий",
+          fromPartId: "tv-part-ac-inlet",
+          fromPinId: "ac_out",
+          fromLabel: "AC Filter Out (230V)",
+          toPartId: "tv-part-smps",
+          toPinId: "ac_in",
+          toLabel: "SMPS AC Input",
+          wireType: "AC Mains 230V",
+          instructionText: "Подключи сетевой провод 230В от фильтра к первичному каскаду блока питания SMPS.",
+        },
+        {
+          id: "tv-w-ac-smps-gnd",
+          wireColor: "black",
+          colorNameRu: "Черный",
+          fromPartId: "tv-part-ac-inlet",
+          fromPinId: "gnd",
+          fromLabel: "AC Filter GND/PE",
+          toPartId: "tv-part-smps",
+          toPinId: "gnd",
+          toLabel: "SMPS GND",
+          wireType: "Общая земля GND",
+          instructionText: "Соедини заземление сетевого фильтра с общей шиной GND блока питания SMPS.",
+        },
+      ],
+    },
+    {
+      step: 3,
+      title: "Шаг 3: Монтаж материнской платы Smart TV и шины питания 12V",
+      requiredParts: ["tv-part-mainboard"],
+      description: "Закрепи системную плату на шасси, подай 12В + GND от блока питания SMPS и запитай линейки Direct-LED 95В.",
+      wiringInstructions: [
+        {
+          id: "tv-w-smps-mb-12v",
+          wireColor: "red",
+          colorNameRu: "Красный",
+          fromPartId: "tv-part-smps",
+          fromPinId: "v12_out",
+          fromLabel: "SMPS 12V Rail",
+          toPartId: "tv-part-mainboard",
+          toPinId: "v12_in",
+          toLabel: "Mainboard 12V In",
+          wireType: "DC Power Harness +12V",
+          instructionText: "Протяни силовой провод +12В от блока питания SMPS к входу Mainboard.",
+        },
+        {
+          id: "tv-w-smps-mb-gnd",
+          wireColor: "black",
+          colorNameRu: "Черный",
+          fromPartId: "tv-part-smps",
+          fromPinId: "gnd",
+          fromLabel: "SMPS GND",
+          toPartId: "tv-part-mainboard",
+          toPinId: "gnd",
+          toLabel: "Mainboard GND",
+          wireType: "Ground Wire",
+          instructionText: "Замкни общую землю GND между блоком питания SMPS и материнской платой.",
+        },
+        {
+          id: "tv-w-smps-led-pwr",
+          wireColor: "orange",
+          colorNameRu: "Оранжевый",
+          fromPartId: "tv-part-smps",
+          fromPinId: "led_out",
+          fromLabel: "LED Driver 95V+",
+          toPartId: "tv-part-backlight",
+          toPinId: "led_in",
+          toLabel: "Backlight Anode String",
+          wireType: "High Voltage DC 95V",
+          instructionText: "Подключи питание 95В от LED-драйвера SMPS к светодиодным линейкам подсветки.",
+        },
+      ],
+    },
+    {
+      step: 4,
+      title: "Шаг 4: Подключение T-Con платы и установка 4K ЖК-матрицы",
+      requiredParts: ["tv-part-tcon", "tv-part-panel"],
+      description: "Соедини материнскую плату со шлейфом V-by-One на плату T-Con и аккуратно уложи стеклянную панель 4K.",
+      wiringInstructions: [
+        {
+          id: "tv-w-mb-tcon-lvds",
+          wireColor: "yellow",
+          colorNameRu: "Желтый",
+          fromPartId: "tv-part-mainboard",
+          fromPinId: "lvds_out",
+          fromLabel: "Mainboard V-by-One",
+          toPartId: "tv-part-tcon",
+          toPinId: "lvds_in",
+          toLabel: "T-Con High Speed In",
+          wireType: "LVDS Ribbon Cable",
+          instructionText: "Подключи цифровой видео-шлейф от материнской платы к контроллеру T-Con.",
+        },
+      ],
+    },
+    {
+      step: 5,
+      title: "Шаг 5: Подключение акустики, фронтальной рамки и запуск",
+      requiredParts: ["tv-part-speakers", "tv-part-bezel"],
+      description: "Подключи стереодинамики к усилителю платы, защелкни тонкую фронтальную рамку и включи телевизор!",
+      wiringInstructions: [
+        {
+          id: "tv-w-mb-spk-audio",
+          wireColor: "purple",
+          colorNameRu: "Фиолетовый",
+          fromPartId: "tv-part-mainboard",
+          fromPinId: "spk_out",
+          fromLabel: "Audio Amp Out",
+          toPartId: "tv-part-speakers",
+          toPinId: "spk_in",
+          toLabel: "Speaker In",
+          wireType: "Audio Cable",
+          instructionText: "Подключи разъем динамиков к аудио-выходу материнской платы.",
+        },
+      ],
+    },
+  ],
+};
+
+// =========================================================================
+// 8. SMART HOME / IOT HUB ARCHITECTURE (Смарт Дом)
+// =========================================================================
+export const SMARTHOME_ARCHITECTURE: CompleteDeviceArchitecture = {
+  id: "device-iothome",
+  name: "Smart Home Automation Gateway Hub",
+  codeName: "ForgeHome IoT Gateway Pro",
+  category: "IoT",
+  description: "Архитектура надежного домашнего шлюза автоматизации умного дома: двухдиапазонный контроллер Zigbee 3.0 / Matter, 4-канальный силовой блок твердотельных реле для управления освещением и розетками, сенсоры микроклимата I2C BME280, PIR датчик движения, OLED дисплей статуса и резервный аккумулятор 18650 UPS.",
+  weightGrams: 420,
+  nominalVoltageV: 12.0,
+  maxPowerW: 36,
+  subsystems: [
+    {
+      id: "smarthome-sub-hub",
+      name: "CONTROLLER & RADIO (Шлюз и Радиомодуль)",
+      category: "Control",
+      description: "Центральный процессор автоматизации с поддержкой Zigbee 3.0, Matter и Wi-Fi.",
+      parts: [
+        {
+          id: "smarthome-part-controller",
+          name: "Центральная плата шлюза IoT (ESP32-S3 + Zigbee CC2652)",
+          category: "Control",
+          subsystem: "HUB",
+          purpose: "Координирует работу беспроводных датчиков, обрабатывает логические сценарии и управляет реле.",
+          inputs: ["5V DC стабилизированное питание", "Радиосигналы Zigbee 2.4GHz"],
+          outputs: ["Шина I2C для датчиков и экрана", "GPIO сигналы включения реле"],
+          powerSpecs: { voltage: "5.0V DC", current: "до 0.8A" },
+          parameters: { "MCU": "ESP32-S3 Dual Core 240MHz", "Zigbee": "CC2652P +20dBm", "Flash": "16MB SPI" },
+          connections: ["Hub Controller → Relays, Sensors, OLED"],
+          failureImpact: "При отказе шлюза сценарии автоматики переходят в ручной аварийный режим.",
+          layerOrder: 2,
+          assembledPosition: [0, 0.2, 0],
+          explodedPosition: [0, 1.2, 0],
+          dimensions: [4.0, 0.3, 4.0],
+          meshType: "smarthome_controller",
+        },
+      ],
+    },
+    {
+      id: "smarthome-sub-power",
+      name: "POWER & UPS BACKUP (Питание и Резерв)",
+      category: "Power",
+      description: "Блок питания 12V с автоматическим переключением на резервный литий-ионный аккумулятор 18650.",
+      parts: [
+        {
+          id: "smarthome-part-psu",
+          name: "Плата резервного питания UPS с Li-Ion 18650 (12V / 5V)",
+          category: "Power",
+          subsystem: "POWER",
+          purpose: "Обеспечивает непрерывную работу системы автоматики даже при отключении электричества в доме.",
+          inputs: ["Внешний блок питания 12V 3A"],
+          outputs: ["12V шина силовых реле", "Стабилизированные 5V для контроллера"],
+          powerSpecs: { voltage: "Вход 12V, Выход 12V & 5V", current: "до 3.0A" },
+          parameters: { "Аккумулятор": "1S2P 18650 5200mAh", "Время автономии": "до 8 часов", "BMS": "Защита от КЗ" },
+          connections: ["UPS → Controller 5V, Relays 12V"],
+          failureImpact: "Отказ батареи делает систему уязвимой к перебоям электросети.",
+          layerOrder: 1,
+          assembledPosition: [-2.5, 0.0, 0],
+          explodedPosition: [-2.5, -1.2, 0],
+          dimensions: [3.0, 0.5, 3.5],
+          meshType: "smarthome_psu",
+        },
+      ],
+    },
+    {
+      id: "smarthome-sub-relays",
+      name: "POWER RELAYS (Силовые исполнительные реле)",
+      category: "Actuator",
+      description: "4-канальный блок твердотельных или электромеханических реле с гальванической развязкой.",
+      parts: [
+        {
+          id: "smarthome-part-relays",
+          name: "4-канальный модуль силовых твердотельных реле 250V/10A",
+          category: "Actuator",
+          subsystem: "RELAYS",
+          purpose: "Коммутирует высоковольтные нагрузки 230В (освещение, насосы, электрообогрев) по командам микроконтроллера.",
+          inputs: ["12V питание катушек", "Оптоизолированные логические сигналы IN1-IN4 3.3V"],
+          outputs: ["4 независимые группы контактов NO/NC 250V 10A"],
+          powerSpecs: { voltage: "12V DC логика / 250V AC коммутация", current: "до 10A на канал" },
+          parameters: { "Каналов": "4 реле Songle", "Опторазвязка": "PC817", "Индикация": "4 красных LED" },
+          connections: ["Relays подключаются к GPIO контроллера шлюза"],
+          failureImpact: "Залипание контактов реле не позволяет отключить подключенный прибор.",
+          layerOrder: 2,
+          assembledPosition: [2.5, 0.2, 0],
+          explodedPosition: [2.5, 1.2, 0],
+          dimensions: [3.2, 0.4, 3.5],
+          meshType: "smarthome_relay",
+        },
+      ],
+    },
+    {
+      id: "smarthome-sub-sensors",
+      name: "SENSORS & TELEMETRY (Датчики микроклимата)",
+      category: "Sensor",
+      description: "Высокоточные цифровые сенсоры состояния помещения.",
+      parts: [
+        {
+          id: "smarthome-part-bme",
+          name: "Датчик микроклимата BME280 (Температура/Влажность/Давление)",
+          category: "Sensor",
+          subsystem: "SENSORS",
+          purpose: "Измеряет температуру с точностью ±0.5°C, относительную влажность и атмосферное давление.",
+          inputs: ["3.3V питание", "Шина I2C (SCL / SDA)"],
+          outputs: ["Цифровые данные микроклимата"],
+          powerSpecs: { voltage: "3.3V DC", current: "3.6 мкА" },
+          parameters: { "Температура": "-40...+85°C", "Влажность": "0...100% RH", "Интерфейс": "I2C 0x76" },
+          connections: ["BME280 → Controller I2C Bus"],
+          failureImpact: "Теряется обратная связь для термостата отопления.",
+          layerOrder: 3,
+          assembledPosition: [-1.5, 0.4, 1.5],
+          explodedPosition: [-1.5, 2.2, 1.5],
+          dimensions: [1.0, 0.2, 1.0],
+          meshType: "smarthome_sensor",
+        },
+        {
+          id: "smarthome-part-pir",
+          name: "Цифровой инфракрасный датчик движения PIR",
+          category: "Sensor",
+          subsystem: "SENSORS",
+          purpose: "Обнаруживает движение людей по инфракрасному тепловому излучению линзы Френеля.",
+          inputs: ["3.3V - 5V питание"],
+          outputs: ["Цифровой импульс HIGH при обнаружении движения"],
+          powerSpecs: { voltage: "3.3V DC", current: "50 мкА" },
+          parameters: { "Дальность": "до 7 метров", "Угол обзора": "120°", "Линза": "Френеля 8202" },
+          connections: ["PIR OUT → Controller GPIO Interrupt"],
+          failureImpact: "Свет не включается автоматически при входе человека в комнату.",
+          layerOrder: 3,
+          assembledPosition: [1.5, 0.4, 1.5],
+          explodedPosition: [1.5, 2.2, 1.5],
+          dimensions: [1.2, 0.4, 1.2],
+          meshType: "smarthome_pir",
+        },
+      ],
+    },
+    {
+      id: "smarthome-sub-ui",
+      name: "DISPLAY & STATUS (Экран и Индикация)",
+      category: "Display",
+      description: "Информационный дисплей текущих параметров и сетевого статуса.",
+      parts: [
+        {
+          id: "smarthome-part-oled",
+          name: "OLED экран статуса 1.3\" I2C + RGB индикатор",
+          category: "Display",
+          subsystem: "STATUS",
+          purpose: "Отображает локальный IP-адрес, статус Zigbee сети, показания датчиков и аварийные оповещения.",
+          inputs: ["3.3V питание", "Шина I2C (SDA / SCL)"],
+          outputs: ["Контрастный монохромный вывод 128x64 пикселей"],
+          powerSpecs: { voltage: "3.3V DC", current: "25 мА" },
+          parameters: { "Диагональ": "1.3 дюйма", "Разрешение": "128x64", "Контроллер": "SH1106" },
+          connections: ["OLED → Controller I2C Bus"],
+          failureImpact: "Потеря локальной визуализации без влияния на работу автоматики в фоне.",
+          layerOrder: 3,
+          assembledPosition: [0, 0.5, -1.0],
+          explodedPosition: [0, 2.5, -1.0],
+          dimensions: [2.0, 0.2, 1.5],
+          meshType: "smarthome_oled",
+        },
+      ],
+    },
+  ],
+  assemblyChecklist: [
+    {
+      step: 1,
+      title: "Шаг 1: Монтаж платы резервного питания UPS и аккумулятора",
+      requiredParts: ["smarthome-part-psu"],
+      description: "Установи плату UPS с аккумулятором 18650 на базовую панель шлюза и проверь выходное напряжение 5В и 12В.",
+      wiringInstructions: [],
+    },
+    {
+      step: 2,
+      title: "Шаг 2: Установка контроллера шлюза и подача питания 5V",
+      requiredParts: ["smarthome-part-controller"],
+      description: "Закрепи центральную плату шлюза ESP32-S3 и подключи питающий провод 5В от платы UPS.",
+      wiringInstructions: [
+        {
+          id: "iot-w-ups-hub-5v",
+          wireColor: "red",
+          colorNameRu: "Красный",
+          fromPartId: "smarthome-part-psu",
+          fromPinId: "5v_out",
+          fromLabel: "UPS 5V VCC",
+          toPartId: "smarthome-part-controller",
+          toPinId: "5v_in",
+          toLabel: "Gateway MCU 5V In",
+          wireType: "Power Cable",
+          instructionText: "Протяни провод питания 5В от UPS к микроконтроллеру шлюза.",
+        },
+        {
+          id: "iot-w-ups-hub-gnd",
+          wireColor: "black",
+          colorNameRu: "Черный",
+          fromPartId: "smarthome-part-psu",
+          fromPinId: "gnd",
+          fromLabel: "UPS GND (-)",
+          toPartId: "smarthome-part-controller",
+          toPinId: "gnd",
+          toLabel: "Gateway MCU GND",
+          wireType: "Ground Cable",
+          instructionText: "Замкни общий минус GND между платой питания и контроллером.",
+        },
+      ],
+    },
+    {
+      step: 3,
+      title: "Шаг 3: Подключение 4-канального силового блока реле",
+      requiredParts: ["smarthome-part-relays"],
+      description: "Установи модуль реле и подключи сигнальные линии управления GPIO от контроллера.",
+      wiringInstructions: [
+        {
+          id: "iot-w-hub-relay-sig",
+          wireColor: "yellow",
+          colorNameRu: "Желтый",
+          fromPartId: "smarthome-part-controller",
+          fromPinId: "gpio_relay",
+          fromLabel: "MCU Relay IO Pins",
+          toPartId: "smarthome-part-relays",
+          toPinId: "in_sig",
+          toLabel: "Relay Board IN1-4",
+          wireType: "Control Signal Bus",
+          instructionText: "Подключи управляющий провод от контакта GPIO контроллера к блоку реле.",
+        },
+      ],
+    },
+    {
+      step: 4,
+      title: "Шаг 4: Подключение сенсоров BME280 и датчика движения PIR",
+      requiredParts: ["smarthome-part-bme", "smarthome-part-pir"],
+      description: "Подключи цифровую шину I2C датчика микроклимата BME280 и сигнальный выход инфракрасного датчика PIR.",
+      wiringInstructions: [
+        {
+          id: "iot-w-hub-bme-i2c",
+          wireColor: "cyan",
+          colorNameRu: "Бирюзовый",
+          fromPartId: "smarthome-part-controller",
+          fromPinId: "i2c_bus",
+          fromLabel: "MCU I2C (SDA/SCL)",
+          toPartId: "smarthome-part-bme",
+          toPinId: "i2c_in",
+          toLabel: "BME280 I2C",
+          wireType: "I2C Bus",
+          instructionText: "Соедини шину I2C датчика температуры BME280 с контроллером.",
+        },
+      ],
+    },
+    {
+      step: 5,
+      title: "Шаг 5: Подключение информационного экрана OLED и запуск",
+      requiredParts: ["smarthome-part-oled"],
+      description: "Подключи экран статуса по шине I2C, включи питание шлюза и убедись в успешной инициализации Zigbee сети!",
+      wiringInstructions: [
+        {
+          id: "iot-w-hub-oled-i2c",
+          wireColor: "orange",
+          colorNameRu: "Оранжевый",
+          fromPartId: "smarthome-part-controller",
+          fromPinId: "i2c_bus",
+          fromLabel: "MCU I2C Bus",
+          toPartId: "smarthome-part-oled",
+          toPinId: "i2c_in",
+          toLabel: "OLED Display I2C",
+          wireType: "I2C Display Cable",
+          instructionText: "Подключи экран OLED к общей шине I2C контроллера.",
+        },
+      ],
+    },
+  ],
+};
+
+// =========================================================================
+// 9. BASIC MOCKUP ARCHITECTURE (Базовый макет: Arduino Uno + Breadboard + LED)
+// =========================================================================
+export const BASIC_MOCKUP_ARCHITECTURE: CompleteDeviceArchitecture = {
+  id: "device-custom",
+  name: "Базовый макет (Arduino + LED)",
+  codeName: "Starter Bench R3",
+  category: "Computing",
+  description: "Организованный стартовый лабораторный стенд: микроконтроллер Arduino Uno R3, макетная плата на 400 точек, токоограничивающий резистор 220Ω и зеленый 5мм светодиод.",
+  weightGrams: 145,
+  nominalVoltageV: 5.0,
+  maxPowerW: 2.5,
+  subsystems: [
+    {
+      id: "custom-sub-mcu",
+      name: "CONTROL & LOGIC (Микроконтроллер Arduino Uno)",
+      category: "Control",
+      description: "Отладочная плата Arduino Uno R3 на микроконтроллере ATmega328P (5V, 16 МГц).",
+      parts: [
+        {
+          id: "comp-arduino-1",
+          name: "Arduino Uno R3",
+          category: "Control",
+          subsystem: "CONTROL",
+          purpose: "Исполняет скетч на C++, формируя сигнал HIGH/LOW или ШИМ на цифровом выходе D13.",
+          inputs: ["Питание USB 5V или VIN 7–12V"],
+          outputs: ["Цифровой выход D13 (5V, макс. 40 мА)", "Шина GND"],
+          powerSpecs: { voltage: "5.0V", current: "до 40 мА на пин" },
+          parameters: { "MCU": "ATmega328P", "Частота": "16 МГц", "Логика": "5V" },
+          connections: ["D13 → Резистор 220Ω → LED Анод", "LED Катод → GND1"],
+          failureImpact: "Без прошивки или общего провода GND светодиод не загорится.",
+          layerOrder: 0,
+          assembledPosition: [-3.5, 0, 0],
+          explodedPosition: [-4.2, 0.2, 0],
+          dimensions: [6.8, 1.2, 5.3],
+          meshType: "arduino_uno",
+        },
+      ],
+    },
+    {
+      id: "custom-sub-proto",
+      name: "PROTOTYPING & LIMITING (Макетная плата и Резистор)",
+      category: "Mechanical",
+      description: "Беспаечная макетная плата и защитный токоограничивающий резистор 220 Ом.",
+      parts: [
+        {
+          id: "comp-breadboard-1",
+          name: "Half Breadboard (400 точек)",
+          category: "Mechanical",
+          subsystem: "PROTOTYPING",
+          purpose: "Беспаечная макетная плата для удобного и безопасного монтажа радиодеталей.",
+          inputs: ["Рельсы питания + и -"],
+          outputs: ["Контактные ряды A–E и F–J"],
+          powerSpecs: { voltage: "до 30V", current: "до 1A" },
+          parameters: { "Точек": "400", "Шаг": "2.54 мм" },
+          connections: ["Базовая площадка для макетирования"],
+          failureImpact: "Без макетной платы сложнее расширять схему дополнительными датчиками.",
+          layerOrder: 0,
+          assembledPosition: [3.5, 0, 0],
+          explodedPosition: [4.2, 0.2, 0],
+          dimensions: [8.3, 0.85, 5.4],
+          meshType: "breadboard_half",
+        },
+        {
+          id: "comp-resistor-1",
+          name: "Резистор 220Ω (Защита LED)",
+          category: "Power",
+          subsystem: "LIMITING",
+          purpose: "Ограничивает ток через светодиод до безопасных ~13.6 мА (при 5В).",
+          inputs: ["Сигнал 5V с пина D13"],
+          outputs: ["Ограниченный ток на анод светодиода"],
+          powerSpecs: { voltage: "5V", current: "13.6 мА" },
+          parameters: { "Сопротивление": "220 Ом", resistance: 220, resistanceOhms: 220 },
+          connections: ["Arduino D13 → pin1 | pin2 → LED Анод (+)"],
+          failureImpact: "Без резистора 220Ω светодиод сгорит мгновенно от перегрузки по току.",
+          layerOrder: 1,
+          assembledPosition: [2.0, 0.8, -1.0],
+          explodedPosition: [2.0, 1.8, -1.0],
+          dimensions: [2.0, 0.5, 0.5],
+          meshType: "resistor",
+        },
+      ],
+    },
+    {
+      id: "custom-sub-output",
+      name: "INDICATION (Светодиодная индикация)",
+      category: "Display",
+      description: "Зеленый 5мм светодиод для визуализации работы цифрового выхода D13.",
+      parts: [
+        {
+          id: "comp-led-1",
+          name: "Зеленый 5мм LED",
+          category: "Display",
+          subsystem: "INDICATION",
+          purpose: "Индицирует состояние пина D13 (мигает по программе из Редактора кода).",
+          inputs: ["Ток 13.6 мА на Анод (+) от резистора"],
+          outputs: ["Возврат тока с Катода (-) на GND Arduino"],
+          powerSpecs: { voltage: "2.0V падение", current: "13–20 мА" },
+          parameters: { "Цвет": "Зеленый", color: "green", forwardVoltage: 2.0, maxCurrentMa: 25 },
+          connections: ["Резистор pin2 → Анод (+) | Катод (-) → Arduino GND1"],
+          failureImpact: "При переполюсовке (катод к плюсу) светодиод не светится.",
+          layerOrder: 2,
+          assembledPosition: [4.5, 0.8, -1.0],
+          explodedPosition: [4.8, 2.2, -1.0],
+          dimensions: [0.8, 1.4, 0.8],
+          meshType: "led",
+        },
+      ],
+    },
+  ],
+  assemblyChecklist: [
+    {
+      step: 1,
+      title: "Шаг 1: Размещение Arduino Uno, макетной платы, резистора и LED",
+      requiredParts: ["comp-arduino-1", "comp-breadboard-1", "comp-resistor-1", "comp-led-1"],
+      description: "Все 4 элемента базового стенда располагаются на верстаке без проводов. Убедитесь, что детали установлены.",
+      wiringInstructions: [],
+    },
+    {
+      step: 2,
+      title: "Шаг 2: Выход Arduino D13 ➜ Токоограничивающий резистор 220Ω",
+      requiredParts: ["comp-arduino-1", "comp-resistor-1"],
+      description: "Соедините цифровой выход D13 на Arduino Uno с первым выводом резистора 220Ω.",
+      wiringInstructions: [
+        {
+          id: "custom-w-d13-res",
+          wireColor: "green",
+          colorNameRu: "Зеленый",
+          fromPartId: "comp-arduino-1",
+          fromPinId: "d13",
+          fromLabel: "Arduino [D13]",
+          toPartId: "comp-resistor-1",
+          toPinId: "pin1",
+          toLabel: "Резистор 220Ω [Вывод 1]",
+          wireType: "Цифровой сигнал 5V",
+          instructionText: "Кликните по пину D13 (Arduino) и соедините его с выводом pin1 резистора 220Ω.",
+        },
+      ],
+    },
+    {
+      step: 3,
+      title: "Шаг 3: Резистор ➜ Анод (+) LED и возврат Катод (-) ➜ GND1",
+      requiredParts: ["comp-resistor-1", "comp-led-1", "comp-arduino-1"],
+      description: "Подключите второй вывод резистора к аноду светодиода и замкните цепь от катода на землю GND1 Arduino.",
+      wiringInstructions: [
+        {
+          id: "custom-w-res-led",
+          wireColor: "yellow",
+          colorNameRu: "Желтый",
+          fromPartId: "comp-resistor-1",
+          fromPinId: "pin2",
+          fromLabel: "Резистор 220Ω [Вывод 2]",
+          toPartId: "comp-led-1",
+          toPinId: "anode",
+          toLabel: "LED [Анод +]",
+          wireType: "Ограниченный ток",
+          instructionText: "Соедините вывод pin2 резистора с анодом (+) светодиода.",
+        },
+        {
+          id: "custom-w-led-gnd",
+          wireColor: "black",
+          colorNameRu: "Черный",
+          fromPartId: "comp-led-1",
+          fromPinId: "cathode",
+          fromLabel: "LED [Катод -]",
+          toPartId: "comp-arduino-1",
+          toPinId: "gnd1",
+          toLabel: "Arduino [GND1]",
+          wireType: "Общий провод GND",
+          instructionText: "Подключите катод (-) светодиода к контакту GND1 на Arduino Uno.",
+        },
+      ],
+    },
+    {
+      step: 4,
+      title: "Шаг 4: Допишите код мигания в Редакторе (</>) и запустите симуляцию",
+      requiredParts: ["comp-arduino-1", "comp-led-1"],
+      description: "Откройте «Код </>», допишите pinMode(13, OUTPUT) и digitalWrite(13, HIGH) / LOW, прошейте Arduino и нажмите «СИМУЛЯЦИЯ»!",
+      wiringInstructions: [],
+    },
+  ],
+};
+
+// Map of all full architectures
+export const COMPLETE_DEVICE_ARCHITECTURES: Record<string, CompleteDeviceArchitecture> = {
+  "device-custom": BASIC_MOCKUP_ARCHITECTURE,
+  "device-drone": DRONE_ARCHITECTURE,
+  "device-drone-pro": DRONE_ARCHITECTURE,
+  "device-drone-combat": DRONE_ARCHITECTURE,
+  "device-smartphone": SMARTPHONE_ARCHITECTURE,
+  "device-smartphone-pro": SMARTPHONE_ARCHITECTURE,
+  "device-robot": ROBOT_ARCHITECTURE,
+  "device-robot-pro": ROBOT_ARCHITECTURE,
+  "device-humanoid": HUMANOID_ARCHITECTURE,
+  "device-humanoid-pro": HUMANOID_ARCHITECTURE,
+  "device-robot-dog": ROBODOG_ARCHITECTURE,
+  "device-laptop": LAPTOP_ARCHITECTURE,
+  "device-television": TELEVISION_ARCHITECTURE,
+  "device-iothome": SMARTHOME_ARCHITECTURE,
+};
+
+/**
+ * Converts a single DevicePartDefinition to PlacedComponent
+ */
+export function convertPartToPlacedComponent(
+  part: DevicePartDefinition,
+  archId: string,
+  isExploded: boolean = false
+): PlacedComponent {
+  const pos = isExploded ? part.explodedPosition : part.assembledPosition;
+  return {
+    id: part.id,
+    type: part.meshType,
+    name: part.name,
+    position: { x: pos[0], y: pos[1], z: pos[2] },
+    rotation: part.rotation
+      ? { x: part.rotation[0], y: part.rotation[1], z: part.rotation[2] }
+      : { x: 0, y: 0, z: 0 },
+    params: {
+      partId: part.id,
+      deviceId: archId,
+      subsystem: part.subsystem,
+      category: part.category,
+      layerOrder: part.layerOrder,
+      assembledPosition: {
+        x: part.assembledPosition[0],
+        y: part.assembledPosition[1],
+        z: part.assembledPosition[2],
+      },
+      explodedPosition: {
+        x: part.explodedPosition[0],
+        y: part.explodedPosition[1],
+        z: part.explodedPosition[2],
+      },
+      ...part.parameters,
+    },
+    state: {
+      isPowered: false,
+      healthPct: 100,
+      temperatureC: 25,
+      status: "normal",
+    },
+  };
+}
+
+/**
+ * Converts a CompleteDeviceArchitecture to PlacedComponent[] and default Wire[]
+ */
+export function convertArchitectureToComponents(
+  arch: CompleteDeviceArchitecture,
+  isExploded: boolean = false
+): { components: PlacedComponent[]; wires: Wire[] } {
+  const components: PlacedComponent[] = [];
+
+  for (const subsystem of arch.subsystems) {
+    for (const part of subsystem.parts) {
+      components.push(convertPartToPlacedComponent(part, arch.id, isExploded));
+    }
+  }
+
+  const wires: Wire[] = [];
+
+  if (arch.id.includes("drone")) {
+    // Battery -> PDB
+    wires.push({
+      id: "drone-wire-bat-pdb-pos",
+      fromComponentId: "drone-part-battery",
+      fromPinId: "pos",
+      toComponentId: "drone-part-pdb",
+      toPinId: "vbat_in",
+      color: "red",
+      crossSectionMm2: 2.5,
+      lengthCm: 8,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "drone-wire-bat-pdb-neg",
+      fromComponentId: "drone-part-battery",
+      fromPinId: "neg",
+      toComponentId: "drone-part-pdb",
+      toPinId: "gnd_in",
+      color: "black",
+      crossSectionMm2: 2.5,
+      lengthCm: 8,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+
+    // PDB -> FC (5V Power)
+    wires.push({
+      id: "drone-wire-pdb-fc-5v",
+      fromComponentId: "drone-part-pdb",
+      fromPinId: "v5_out",
+      toComponentId: "drone-part-fc",
+      toPinId: "vin",
+      color: "red",
+      crossSectionMm2: 0.5,
+      lengthCm: 4,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "drone-wire-pdb-fc-gnd",
+      fromComponentId: "drone-part-pdb",
+      fromPinId: "gnd_out",
+      toComponentId: "drone-part-fc",
+      toPinId: "gnd",
+      color: "black",
+      crossSectionMm2: 0.5,
+      lengthCm: 4,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+
+    // FC -> ESC Signal PWM
+    wires.push({
+      id: "drone-wire-fc-esc-m1",
+      fromComponentId: "drone-part-fc",
+      fromPinId: "m1",
+      toComponentId: "drone-part-esc",
+      toPinId: "sig1",
+      color: "blue",
+      crossSectionMm2: 0.2,
+      lengthCm: 3,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "drone-wire-fc-esc-m2",
+      fromComponentId: "drone-part-fc",
+      fromPinId: "m2",
+      toComponentId: "drone-part-esc",
+      toPinId: "sig2",
+      color: "blue",
+      crossSectionMm2: 0.2,
+      lengthCm: 3,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+
+    // Camera -> VTX
+    wires.push({
+      id: "drone-wire-cam-vtx-vid",
+      fromComponentId: "drone-part-camera",
+      fromPinId: "video",
+      toComponentId: "drone-part-vtx",
+      toPinId: "vin",
+      color: "yellow",
+      crossSectionMm2: 0.2,
+      lengthCm: 7,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+  } else if (arch.id.includes("smartphone")) {
+    // Battery -> Motherboard
+    wires.push({
+      id: "phone-w-bat-mb-pos",
+      fromComponentId: "phone-part-battery",
+      fromPinId: "pos",
+      toComponentId: "phone-part-motherboard",
+      toPinId: "vbat_in",
+      color: "red",
+      crossSectionMm2: 0.5,
+      lengthCm: 4,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "phone-w-bat-mb-neg",
+      fromComponentId: "phone-part-battery",
+      fromPinId: "neg",
+      toComponentId: "phone-part-motherboard",
+      toPinId: "gnd",
+      color: "black",
+      crossSectionMm2: 0.5,
+      lengthCm: 4,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+
+    // Motherboard -> Display (OLED)
+    wires.push({
+      id: "phone-w-mb-disp",
+      fromComponentId: "phone-part-motherboard",
+      fromPinId: "disp_out",
+      toComponentId: "phone-part-oled",
+      toPinId: "mipi",
+      color: "yellow",
+      crossSectionMm2: 0.2,
+      lengthCm: 3,
+      conductorMaterial: "gold",
+      insulationMaterial: "silicone",
+    });
+
+    // Motherboard -> Camera Module
+    wires.push({
+      id: "phone-w-mb-cam",
+      fromComponentId: "phone-part-motherboard",
+      fromPinId: "cam_in",
+      toComponentId: "phone-part-cameras",
+      toPinId: "mipi",
+      color: "cyan",
+      crossSectionMm2: 0.15,
+      lengthCm: 2,
+      conductorMaterial: "gold",
+      insulationMaterial: "silicone",
+    });
+
+    // Motherboard -> Flashlight / Torch LED
+    wires.push({
+      id: "phone-w-mb-flash",
+      fromComponentId: "phone-part-motherboard",
+      fromPinId: "flash_out",
+      toComponentId: "phone-part-flash",
+      toPinId: "ctrl",
+      color: "orange",
+      crossSectionMm2: 0.2,
+      lengthCm: 2,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+
+    // Motherboard -> Speaker
+    wires.push({
+      id: "phone-w-mb-spk",
+      fromComponentId: "phone-part-motherboard",
+      fromPinId: "spk_out",
+      toComponentId: "phone-part-speaker",
+      toPinId: "spk_p",
+      color: "purple",
+      crossSectionMm2: 0.2,
+      lengthCm: 5,
+      conductorMaterial: "copper",
+      insulationMaterial: "pvc",
+    });
+  } else if (arch.id.includes("robot")) {
+    // Battery -> L298N
+    wires.push({
+      id: "bot-w-bat-drv-pos",
+      fromComponentId: "bot-part-battery",
+      fromPinId: "pos",
+      toComponentId: "bot-part-driver",
+      toPinId: "vin",
+      color: "red",
+      crossSectionMm2: 1.0,
+      lengthCm: 8,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "bot-w-bat-drv-neg",
+      fromComponentId: "bot-part-battery",
+      fromPinId: "neg",
+      toComponentId: "bot-part-driver",
+      toPinId: "gnd",
+      color: "black",
+      crossSectionMm2: 1.0,
+      lengthCm: 8,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+
+    // Arduino -> Sonar
+    wires.push({
+      id: "bot-w-mcu-sonar-vcc",
+      fromComponentId: "bot-part-mcu",
+      fromPinId: "5v",
+      toComponentId: "bot-part-sonar",
+      toPinId: "vcc",
+      color: "red",
+      crossSectionMm2: 0.3,
+      lengthCm: 10,
+      conductorMaterial: "copper",
+      insulationMaterial: "pvc",
+    });
+    wires.push({
+      id: "bot-w-mcu-sonar-gnd",
+      fromComponentId: "bot-part-mcu",
+      fromPinId: "gnd",
+      toComponentId: "bot-part-sonar",
+      toPinId: "gnd",
+      color: "black",
+      crossSectionMm2: 0.3,
+      lengthCm: 10,
+      conductorMaterial: "copper",
+      insulationMaterial: "pvc",
+    });
+  } else if (arch.id.includes("humanoid")) {
+    // Battery 24V -> Torso
+    wires.push({
+      id: "humanoid-w-bat-torso-pos",
+      fromComponentId: "humanoid-batt",
+      fromPinId: "pos",
+      toComponentId: "humanoid-torso-main",
+      toPinId: "vin",
+      color: "red",
+      crossSectionMm2: 4.0,
+      lengthCm: 14,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "humanoid-w-bat-torso-neg",
+      fromComponentId: "humanoid-batt",
+      fromPinId: "neg",
+      toComponentId: "humanoid-torso-main",
+      toPinId: "gnd",
+      color: "black",
+      crossSectionMm2: 4.0,
+      lengthCm: 14,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    // Torso -> Arm Left
+    wires.push({
+      id: "humanoid-w-torso-arm-l",
+      fromComponentId: "humanoid-torso-main",
+      fromPinId: "can_l",
+      toComponentId: "humanoid-arm-l",
+      toPinId: "can_in",
+      color: "cyan",
+      crossSectionMm2: 0.75,
+      lengthCm: 18,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    // Torso -> Arm Right
+    wires.push({
+      id: "humanoid-w-torso-arm-r",
+      fromComponentId: "humanoid-torso-main",
+      fromPinId: "can_r",
+      toComponentId: "humanoid-arm-r",
+      toPinId: "can_in",
+      color: "cyan",
+      crossSectionMm2: 0.75,
+      lengthCm: 18,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    // Torso -> Head
+    wires.push({
+      id: "humanoid-w-torso-head-pwr",
+      fromComponentId: "humanoid-torso-main",
+      fromPinId: "5v_out",
+      toComponentId: "humanoid-head-main",
+      toPinId: "vin",
+      color: "red",
+      crossSectionMm2: 0.5,
+      lengthCm: 12,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "humanoid-w-head-torso-video",
+      fromComponentId: "humanoid-head-main",
+      fromPinId: "cam_out",
+      toComponentId: "humanoid-torso-main",
+      toPinId: "cam_in",
+      color: "yellow",
+      crossSectionMm2: 0.25,
+      lengthCm: 12,
+      conductorMaterial: "gold",
+      insulationMaterial: "silicone",
+    });
+    // Torso -> Leg Left
+    wires.push({
+      id: "humanoid-w-torso-leg-l",
+      fromComponentId: "humanoid-torso-main",
+      fromPinId: "leg_l_pwr",
+      toComponentId: "humanoid-leg-l",
+      toPinId: "pwr_in",
+      color: "purple",
+      crossSectionMm2: 2.5,
+      lengthCm: 22,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    // Torso -> Leg Right
+    wires.push({
+      id: "humanoid-w-torso-leg-r",
+      fromComponentId: "humanoid-torso-main",
+      fromPinId: "leg_r_pwr",
+      toComponentId: "humanoid-leg-r",
+      toPinId: "pwr_in",
+      color: "purple",
+      crossSectionMm2: 2.5,
+      lengthCm: 22,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+  } else if (arch.id.includes("dog")) {
+    wires.push({
+      id: "dog-w-bat-chassis-pos",
+      fromComponentId: "dog-batt",
+      fromPinId: "pos",
+      toComponentId: "dog-chassis",
+      toPinId: "vin",
+      color: "red",
+      crossSectionMm2: 4.0,
+      lengthCm: 10,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "dog-w-bat-chassis-neg",
+      fromComponentId: "dog-batt",
+      fromPinId: "neg",
+      toComponentId: "dog-chassis",
+      toPinId: "gnd",
+      color: "black",
+      crossSectionMm2: 4.0,
+      lengthCm: 10,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+  } else if (arch.id.includes("laptop")) {
+    wires.push({
+      id: "lap-w-bat-mb-pos",
+      fromComponentId: "laptop-part-battery",
+      fromPinId: "pos",
+      toComponentId: "laptop-part-motherboard",
+      toPinId: "vbat",
+      color: "red",
+      crossSectionMm2: 2.5,
+      lengthCm: 6,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "lap-w-bat-mb-neg",
+      fromComponentId: "laptop-part-battery",
+      fromPinId: "neg",
+      toComponentId: "laptop-part-motherboard",
+      toPinId: "gnd",
+      color: "black",
+      crossSectionMm2: 2.5,
+      lengthCm: 6,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "lap-w-fan-pwm",
+      fromComponentId: "laptop-part-motherboard",
+      fromPinId: "fan_pwm",
+      toComponentId: "laptop-part-cooler",
+      toPinId: "pwm_in",
+      color: "yellow",
+      crossSectionMm2: 0.25,
+      lengthCm: 4,
+      conductorMaterial: "copper",
+      insulationMaterial: "pvc",
+    });
+    wires.push({
+      id: "lap-w-edp-video",
+      fromComponentId: "laptop-part-motherboard",
+      fromPinId: "edp_out",
+      toComponentId: "laptop-part-screen",
+      toPinId: "edp_in",
+      color: "cyan",
+      crossSectionMm2: 0.2,
+      lengthCm: 8,
+      conductorMaterial: "gold",
+      insulationMaterial: "silicone",
+    });
+  } else if (arch.id.includes("television")) {
+    wires.push({
+      id: "tv-w-ac-smps",
+      fromComponentId: "tv-part-ac-inlet",
+      fromPinId: "ac_out",
+      toComponentId: "tv-part-smps",
+      toPinId: "ac_in",
+      color: "blue",
+      crossSectionMm2: 1.5,
+      lengthCm: 10,
+      conductorMaterial: "copper",
+      insulationMaterial: "pvc",
+    });
+    wires.push({
+      id: "tv-w-ac-smps-gnd",
+      fromComponentId: "tv-part-ac-inlet",
+      fromPinId: "gnd",
+      toComponentId: "tv-part-smps",
+      toPinId: "gnd",
+      color: "black",
+      crossSectionMm2: 1.5,
+      lengthCm: 10,
+      conductorMaterial: "copper",
+      insulationMaterial: "pvc",
+    });
+    wires.push({
+      id: "tv-w-smps-mb-12v",
+      fromComponentId: "tv-part-smps",
+      fromPinId: "v12_out",
+      toComponentId: "tv-part-mainboard",
+      toPinId: "v12_in",
+      color: "red",
+      crossSectionMm2: 1.0,
+      lengthCm: 8,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "tv-w-smps-mb-gnd",
+      fromComponentId: "tv-part-smps",
+      fromPinId: "gnd",
+      toComponentId: "tv-part-mainboard",
+      toPinId: "gnd",
+      color: "black",
+      crossSectionMm2: 1.0,
+      lengthCm: 8,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "tv-w-smps-led-pwr",
+      fromComponentId: "tv-part-smps",
+      fromPinId: "led_out",
+      toComponentId: "tv-part-backlight",
+      toPinId: "led_in",
+      color: "orange",
+      crossSectionMm2: 0.75,
+      lengthCm: 12,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "tv-w-mb-tcon-lvds",
+      fromComponentId: "tv-part-mainboard",
+      fromPinId: "lvds_out",
+      toComponentId: "tv-part-tcon",
+      toPinId: "lvds_in",
+      color: "yellow",
+      crossSectionMm2: 0.2,
+      lengthCm: 6,
+      conductorMaterial: "gold",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "tv-w-mb-spk-audio",
+      fromComponentId: "tv-part-mainboard",
+      fromPinId: "spk_out",
+      toComponentId: "tv-part-speakers",
+      toPinId: "spk_in",
+      color: "purple",
+      crossSectionMm2: 0.5,
+      lengthCm: 10,
+      conductorMaterial: "copper",
+      insulationMaterial: "pvc",
+    });
+  } else if (arch.id.includes("iothome")) {
+    wires.push({
+      id: "iot-w-ups-hub-5v",
+      fromComponentId: "smarthome-part-psu",
+      fromPinId: "5v_out",
+      toComponentId: "smarthome-part-controller",
+      toPinId: "5v_in",
+      color: "red",
+      crossSectionMm2: 0.5,
+      lengthCm: 6,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "iot-w-ups-hub-gnd",
+      fromComponentId: "smarthome-part-psu",
+      fromPinId: "gnd",
+      toComponentId: "smarthome-part-controller",
+      toPinId: "gnd",
+      color: "black",
+      crossSectionMm2: 0.5,
+      lengthCm: 6,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "iot-w-hub-relay-sig",
+      fromComponentId: "smarthome-part-controller",
+      fromPinId: "gpio_relay",
+      toComponentId: "smarthome-part-relays",
+      toPinId: "in_sig",
+      color: "yellow",
+      crossSectionMm2: 0.25,
+      lengthCm: 5,
+      conductorMaterial: "copper",
+      insulationMaterial: "pvc",
+    });
+    wires.push({
+      id: "iot-w-hub-bme-i2c",
+      fromComponentId: "smarthome-part-controller",
+      fromPinId: "i2c_bus",
+      toComponentId: "smarthome-part-bme",
+      toPinId: "i2c_in",
+      color: "cyan",
+      crossSectionMm2: 0.2,
+      lengthCm: 4,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+    wires.push({
+      id: "iot-w-hub-oled-i2c",
+      fromComponentId: "smarthome-part-controller",
+      fromPinId: "i2c_bus",
+      toComponentId: "smarthome-part-oled",
+      toPinId: "i2c_in",
+      color: "orange",
+      crossSectionMm2: 0.2,
+      lengthCm: 4,
+      conductorMaterial: "copper",
+      insulationMaterial: "silicone",
+    });
+  } else if (arch.id.includes("custom")) {
+    wires.push({
+      id: "custom-w-d13-res",
+      fromComponentId: "comp-arduino-1",
+      fromPinId: "d13",
+      toComponentId: "comp-resistor-1",
+      toPinId: "pin1",
+      color: "green",
+      crossSectionMm2: 0.5,
+      lengthCm: 15,
+      conductorMaterial: "copper",
+      insulationMaterial: "pvc",
+    });
+    wires.push({
+      id: "custom-w-res-led",
+      fromComponentId: "comp-resistor-1",
+      fromPinId: "pin2",
+      toComponentId: "comp-led-1",
+      toPinId: "anode",
+      color: "yellow",
+      crossSectionMm2: 0.5,
+      lengthCm: 10,
+      conductorMaterial: "copper",
+      insulationMaterial: "pvc",
+    });
+    wires.push({
+      id: "custom-w-led-gnd",
+      fromComponentId: "comp-led-1",
+      fromPinId: "cathode",
+      toComponentId: "comp-arduino-1",
+      toPinId: "gnd1",
+      color: "black",
+      crossSectionMm2: 0.5,
+      lengthCm: 20,
+      conductorMaterial: "copper",
+      insulationMaterial: "pvc",
+    });
+  }
+
+  return { components, wires };
+}
+
+/**
+ * Returns default wiring for a specific part in an architecture
+ */
+export function getPartDefaultWires(
+  arch: CompleteDeviceArchitecture,
+  partId: string
+): Wire[] {
+  const allWires = convertArchitectureToComponents(arch).wires;
+  return allWires.filter(
+    (w) => w.fromComponentId === partId || w.toComponentId === partId
+  );
+}
+
+/**
+ * Returns default wiring for a whole subsystem in an architecture
+ */
+export function getSubsystemDefaultWires(
+  arch: CompleteDeviceArchitecture,
+  subsystemId: string
+): Wire[] {
+  const sub = arch.subsystems.find((s) => s.id === subsystemId);
+  if (!sub) return [];
+  const partIds = new Set(sub.parts.map((p) => p.id));
+  const allWires = convertArchitectureToComponents(arch).wires;
+  return allWires.filter(
+    (w) => partIds.has(w.fromComponentId) || partIds.has(w.toComponentId)
+  );
+}
+

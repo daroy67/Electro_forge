@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ElectroForge — 3D платформа схемотехники и инженерии</title>
+    <meta name="description" content="Интерактивная 3D лаборатория для моделирования электроники, физики, микроконтроллеров и инженерных прототипов." />
+    <meta property="og:title" content="ElectroForge — 3D платформа схемотехники и инженерии" />
+    <meta property="og:description" content="Интерактивная 3D лаборатория для моделирования электроники, физики, микроконтроллеров и инженерных прототипов." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+      // AI Studio Environment: HMR is disabled. Handle Vite HMR WebSocket quietly.
+      (function () {
+        if (typeof window === 'undefined') return;
+        var RealWebSocket = window.WebSocket;
+        if (!RealWebSocket) return;
+
+        function MockViteSocket() {
+          var listeners = {};
+          this.readyState = 1; // WebSocket.OPEN
+          this.OPEN = 1;
+          this.CONNECTING = 0;
+          this.CLOSING = 2;
+          this.CLOSED = 3;
+
+          this.addEventListener = function (type, fn) {
+            if (!listeners[type]) listeners[type] = [];
+            listeners[type].push(fn);
+            if (type === 'open') {
+              setTimeout(function () {
+                try { fn({ type: 'open' }); } catch (e) {}
+              }, 0);
+            }
+          };
+
+          this.removeEventListener = function (type, fn) {
+            if (!listeners[type]) return;
+            listeners[type] = listeners[type].filter(function (f) { return f !== fn; });
+          };
+
+          this.send = function () {};
+          this.close = function () {};
+        }
+
+        MockViteSocket.prototype = Object.create(RealWebSocket.prototype);
+
+        window.WebSocket = function (url, protocols) {
+          if (
+            protocols === 'vite-hmr' ||
+            protocols === 'vite-ping' ||
+            (typeof url === 'string' && (url.includes('token=') || url.includes('/@vite/')))
+          ) {
+            return new MockViteSocket();
+          }
+          return new RealWebSocket(url, protocols);
+        };
+
+        window.WebSocket.prototype = RealWebSocket.prototype;
+        window.WebSocket.OPEN = RealWebSocket.OPEN;
+        window.WebSocket.CONNECTING = RealWebSocket.CONNECTING;
+        window.WebSocket.CLOSING = RealWebSocket.CLOSING;
+        window.WebSocket.CLOSED = RealWebSocket.CLOSED;
+      })();
+
+      // Suppress HMR and WebSocket disconnection errors per AI Studio environment constraints
+      window.addEventListener('unhandledrejection', function (e) {
+        var reason = e.reason;
+        var msg = (reason && (reason.message || reason.stack || String(reason))) || '';
+        if (
+          msg.includes('WebSocket') ||
+          msg.includes('ws') ||
+          msg.includes('@vite/client') ||
+          msg.includes('vite:ws')
+        ) {
+          e.preventDefault();
+        }
+      });
+      window.addEventListener('error', function (e) {
+        var msg = (e.message || '') + ' ' + (e.filename || '');
+        if (
+          msg.includes('WebSocket') ||
+          msg.includes('@vite/client')
+        ) {
+          e.preventDefault();
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

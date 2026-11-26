@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Remix Remix №1 ElectroForge 3",
+  "description": "Interactive 3D engineering platform for electronics, physics, programming, and physical prototyping with AI engineering mentor.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
